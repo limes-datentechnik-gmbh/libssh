@@ -133,6 +133,9 @@
 /* Define to 1 if you have the `_strtoui64' function. */
 #cmakedefine HAVE__STRTOUI64 1
 
+/* Define to 1 if you have the `strcasecmp' function only in strings.h. */
+#cmakedefine NEED_STRINGS_H 1
+
 /*************************** LIBRARIES ***************************/
 
 /* Define to 1 if you have the `crypto' library (-lcrypto). */

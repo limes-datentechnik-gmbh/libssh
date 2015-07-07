@@ -27,6 +27,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#if !defined(_WIN32) && defined(NEED_STRINGS_H)
+#include <strings.h>
+#endif
+
 
 #include "libssh/priv.h"
 #include "libssh/session.h"

@@ -28,6 +28,9 @@
 #include <string.h>
 #ifndef _WIN32
 #include <pwd.h>
+#ifdef NEED_STRINGS_H
+#include <strings.h>
+#endif
 #else
 #include <winsock2.h>
 #endif
