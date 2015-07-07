@@ -56,6 +56,11 @@ static int crypto_verify_32(const unsigned char *x,const unsigned char *y)
     F(30)
     F(31)
 
+#ifdef DEBUG_CRYPTO
+    ssh_print_hexa("crypto_verify_32: x", x, 32);
+    ssh_print_hexa("crypto_verify_32: y", y, 32);
+    fprintf(stderr, "crypto_verify_32: differentbits: %d\n", differentbits);
+#endif
     return (1 & ((differentbits - 1) >> 8)) - 1;
 }
 

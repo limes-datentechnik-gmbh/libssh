@@ -183,6 +183,11 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
     sig_blob = session->next_crypto->dh_server_signature;
     session->next_crypto->dh_server_signature = NULL;
 
+#ifdef DEBUG_CRYPTO
+    ssh_print_hexa("Server signature: ", ssh_string_data(sig_blob), ssh_string_len(sig_blob));
+    ssh_print_hexa("Server Public Key: ", ssh_string_data(session->next_crypto->server_pubkey), ssh_string_len(session->next_crypto->server_pubkey));
+#endif
+
     /* get the server public key */
     rc = ssh_pki_import_pubkey_blob(session->next_crypto->server_pubkey, &key);
     if (rc < 0) {

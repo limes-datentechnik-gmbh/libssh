@@ -111,6 +111,12 @@ unsigned char *packet_encrypt(ssh_session session, void *data, uint32_t len) {
   seq = ntohl(session->send_seq);
   crypto = session->current_crypto->out_cipher;
 
+#ifdef DEBUG_CRYPTO
+    ssh_print_hexa("encrypt key: ",session->current_crypto->encryptkey,sizeof(enckey));
+    ssh_print_hexa("encrypt IV: ",session->current_crypto->encryptIV,session->current_crypto->digest_len);
+    ssh_print_hexa("encrypt MAC: ",session->current_crypto->encryptMAC,session->current_crypto->digest_len);
+    ssh_print_hexa("data: ",data,len);
+#endif
   if (crypto->set_encrypt_key(crypto, session->current_crypto->encryptkey,
       session->current_crypto->encryptIV) < 0) {
     SAFE_FREE(out);
