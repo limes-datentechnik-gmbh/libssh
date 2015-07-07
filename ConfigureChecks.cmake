@@ -129,6 +129,7 @@ else (WIN32)
     check_function_exists(poll HAVE_POLL)
     check_function_exists(select HAVE_SELECT)
     check_function_exists(getaddrinfo HAVE_GETADDRINFO)
+    check_function_exists(nanosleep HAVE_NANOSLEEP)
 
     check_symbol_exists(ntohll arpa/inet.h HAVE_NTOHLL)
     check_symbol_exists(htonll arpa/inet.h HAVE_HTONLL)

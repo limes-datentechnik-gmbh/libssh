@@ -1917,10 +1917,12 @@ error:
 static ssh_channel ssh_channel_accept(ssh_session session, int channeltype,
     int timeout_ms, int *destination_port) {
 #ifndef _WIN32
+#ifdef HAVE_NANOSLEEP
   static const struct timespec ts = {
     .tv_sec = 0,
     .tv_nsec = 50000000 /* 50ms */
   };
+#endif
 #endif
   ssh_message msg = NULL;
   ssh_channel channel = NULL;
@@ -1960,7 +1962,11 @@ static ssh_channel ssh_channel_accept(ssh_session session, int channeltype,
 #ifdef _WIN32
       Sleep(50); /* 50ms */
 #else
+#ifdef HAVE_NANOSLEEP
       nanosleep(&ts, NULL);
+#else
+      usleep(50000);
+#endif
 #endif
     }
   }
