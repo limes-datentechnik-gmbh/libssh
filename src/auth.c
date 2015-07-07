@@ -68,7 +68,13 @@
 static int ssh_userauth_request_service(ssh_session session) {
     int rc;
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     rc = ssh_service_request(session, "ssh-userauth");
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
     if (rc != SSH_OK) {
         SSH_LOG(SSH_LOG_WARN,
                 "Failed to request \"ssh-userauth\" service");
@@ -194,6 +200,10 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_failure){
     session->auth_state=SSH_AUTH_STATE_ERROR;
     goto end;
   }
+
+#ifdef __EBCDIC__
+  ssh_string_to_ebcdic(auth_methods, auth_methods, strlen(auth_methods));
+#endif
 
   if (partial) {
     session->auth_state=SSH_AUTH_STATE_PARTIAL;
@@ -353,6 +363,14 @@ int ssh_userauth_list(ssh_session session, const char *username)
  */
 int ssh_userauth_none(ssh_session session, const char *username) {
     int rc;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+    static const char* str_ssh_connection = "ssh-connection";
+    static const char* str_none = "none";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 #ifdef WITH_SSH1
     if (session->version == 1) {
@@ -382,8 +400,8 @@ int ssh_userauth_none(ssh_session session, const char *username) {
     rc = ssh_buffer_pack(session->out_buffer, "bsss",
             SSH2_MSG_USERAUTH_REQUEST,
             username ? username : session->opts.username,
-            "ssh-connection",
-            "none"
+            str_ssh_connection,
+            str_none
             );
     if (rc < 0) {
         goto fail;
@@ -444,6 +462,14 @@ int ssh_userauth_try_publickey(ssh_session session,
 {
     ssh_string pubkey_s = NULL;
     int rc;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+    static const char* str_ssh_connection = "ssh-connection";
+    static const char* str_publickey = "publickey";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
     if (session == NULL) {
         return SSH_AUTH_ERROR;
@@ -489,8 +515,8 @@ int ssh_userauth_try_publickey(ssh_session session,
     rc = ssh_buffer_pack(session->out_buffer, "bsssbsS",
             SSH2_MSG_USERAUTH_REQUEST,
             username ? username : session->opts.username,
-            "ssh-connection",
-            "publickey",
+            str_ssh_connection,
+            str_publickey,
             0, /* private key ? */
             pubkey->type_c, /* algo */
             pubkey_s /* public key */
@@ -553,6 +579,14 @@ int ssh_userauth_publickey(ssh_session session,
 {
     ssh_string str = NULL;
     int rc;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+    static const char* str_ssh_connection = "ssh-connection";
+    static const char* str_publickey = "publickey";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
     if (session == NULL) {
         return SSH_AUTH_ERROR;
@@ -598,8 +632,8 @@ int ssh_userauth_publickey(ssh_session session,
     rc = ssh_buffer_pack(session->out_buffer, "bsssbsS",
             SSH2_MSG_USERAUTH_REQUEST,
             username ? username : session->opts.username,
-            "ssh-connection",
-            "publickey",
+            str_ssh_connection,
+            str_publickey,
             1, /* private key */
             privkey->type_c, /* algo */
             str /* public key */
@@ -651,6 +685,14 @@ static int ssh_userauth_agent_publickey(ssh_session session,
 {
     ssh_string str = NULL;
     int rc;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+    static const char* str_ssh_connection = "ssh-connection";
+    static const char* str_publickey = "publickey";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
     switch(session->pending_call_state) {
         case SSH_PENDING_CALL_NONE:
@@ -682,8 +724,8 @@ static int ssh_userauth_agent_publickey(ssh_session session,
     rc = ssh_buffer_pack(session->out_buffer, "bsssbsS",
             SSH2_MSG_USERAUTH_REQUEST,
             username ? username : session->opts.username,
-            "ssh-connection",
-            "publickey",
+            str_ssh_connection,
+            str_publickey,
             1, /* private key */
             pubkey->type_c, /* algo */
             str /* public key */
@@ -1105,6 +1147,14 @@ int ssh_userauth_password(ssh_session session,
                           const char *username,
                           const char *password) {
     int rc;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+    static const char* str_ssh_connection = "ssh-connection";
+    static const char* str_password = "password";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 #ifdef WITH_SSH1
     if (session->version == 1) {
@@ -1136,8 +1186,8 @@ int ssh_userauth_password(ssh_session session,
     rc = ssh_buffer_pack(session->out_buffer, "bsssbs",
             SSH2_MSG_USERAUTH_REQUEST,
             username ? username : session->opts.username,
-            "ssh-connection",
-            "password",
+            str_ssh_connection,
+            str_password,
             0, /* false */
             password
     );
@@ -1283,6 +1333,15 @@ static int ssh_userauth_kbdint_init(ssh_session session,
                                     const char *submethods)
 {
     int rc;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+    static const char* str_ssh_connection = "ssh-connection";
+    static const char* str_keyboard_interactive = "keyboard-interactive";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
+
     if (session->pending_call_state == SSH_PENDING_CALL_AUTH_KBDINT_INIT)
         goto pending;
     if (session->pending_call_state != SSH_PENDING_CALL_NONE){
@@ -1300,8 +1359,8 @@ static int ssh_userauth_kbdint_init(ssh_session session,
     rc = ssh_buffer_pack(session->out_buffer, "bsssss",
             SSH2_MSG_USERAUTH_REQUEST,
             username ? username : session->opts.username,
-            "ssh-connection",
-            "keyboard-interactive",
+            str_ssh_connection,
+            str_keyboard_interactive,
             "", /* lang (ignore it) */
             submethods ? submethods : ""
     );

@@ -103,6 +103,9 @@ static int callback_receive_banner(const void *data, size_t len, void *user) {
   	return SSH_ERROR;
   }
   for(i=0;i<len;++i){
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
 #ifdef WITH_PCAP
   	if(session->pcap_ctx && buffer[i] == '\n'){
   		ssh_pcap_context_write(session->pcap_ctx,SSH_PCAP_DIR_IN,buffer,i+1,i+1);
@@ -121,7 +124,18 @@ static int callback_receive_banner(const void *data, size_t len, void *user) {
         ret = i + 1;
         session->serverbanner = str;
   		session->session_state=SSH_SESSION_STATE_BANNER_RECEIVED;
-  		SSH_LOG(SSH_LOG_PACKET,"Received banner: %s",str);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+        str = strdup(buffer);
+        if (str == NULL) {
+            return SSH_ERROR;
+        }
+        ssh_string_to_ebcdic(str, str, strlen(str));
+#endif
+        SSH_LOG(SSH_LOG_PACKET,"Received banner: %s",str);
+#ifdef __EBCDIC__
+        free(str);
+#endif
 		session->ssh_connection_callback(session);
 
   		return ret;
@@ -152,6 +166,9 @@ int ssh_send_banner(ssh_session session, int server) {
   char buffer[128] = {0};
   int err=SSH_ERROR;
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   banner = session->version == 1 ? CLIENTBANNER1 : CLIENTBANNER2;
 
   if (server) {
@@ -164,16 +181,19 @@ int ssh_send_banner(ssh_session session, int server) {
     	strcpy(session->serverbanner, "SSH-2.0-");
     	strcat(session->serverbanner, session->opts.custombanner);
     }
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
     if (session->serverbanner == NULL) {
       goto end;
     }
-    snprintf(buffer, 128, "%s\n", session->serverbanner);
+    snprintf(buffer, 128, "%s\x0D\x0A", session->serverbanner);
   } else {
     session->clientbanner = strdup(banner);
     if (session->clientbanner == NULL) {
       goto end;
     }
-    snprintf(buffer, 128, "%s\n", session->clientbanner);
+    snprintf(buffer, 128, "%s\x0D\x0A", session->clientbanner);
   }
 
   if (ssh_socket_write(session->socket, buffer, strlen(buffer)) == SSH_ERROR) {
@@ -282,6 +302,8 @@ int ssh_service_request(ssh_session session, const char *service) {
       ssh_set_error_oom(session);
       return SSH_ERROR;
   }
+  ssh_print_hexa("ssh_service_request packet", (unsigned char*)session->out_buffer->data, session->out_buffer->used);
+
   session->auth_service_state=SSH_AUTH_SERVICE_SENT;
   if (packet_send(session) == SSH_ERROR) {
     ssh_set_error(session, SSH_FATAL,
@@ -289,8 +311,13 @@ int ssh_service_request(ssh_session session, const char *service) {
       return SSH_ERROR;
   }
 
+#ifdef __EBCDIC__
+  SSH_LOG(SSH_LOG_PACKET,
+      "Sent SSH_MSG_SERVICE_REQUEST (service %s)", ssh_string_for_log(service));
+#else
   SSH_LOG(SSH_LOG_PACKET,
       "Sent SSH_MSG_SERVICE_REQUEST (service %s)", service);
+#endif
 pending:
   rc=ssh_handle_packets_termination(session,SSH_TIMEOUT_USER,
       ssh_service_request_termination, session);
@@ -331,6 +358,9 @@ pending:
  */
 static void ssh_client_connection_callback(ssh_session session){
 	int ssh1,ssh2;
+#ifdef __EBCDIC__
+	char* banner;
+#endif
 
 	switch(session->session_state){
 		case SSH_SESSION_STATE_NONE:
@@ -342,8 +372,20 @@ static void ssh_client_connection_callback(ssh_session session){
 		    goto error;
 		  }
 		  set_status(session, 0.4f);
+#ifdef __EBCDIC__
+		  banner = strdup(session->serverbanner);
+		  if (banner == NULL) {
+		    ssh_set_error(session, SSH_FATAL,
+		        "Memory allocation failed for banner");
+		    goto error;
+		  }
+		  ssh_string_to_ebcdic(banner, banner, strlen(banner));
+		  SSH_LOG(SSH_LOG_RARE, "SSH server banner: %s", banner);
+		  free(banner);
+#else
 		  SSH_LOG(SSH_LOG_RARE,
 		      "SSH server banner: %s", session->serverbanner);
+#endif
 
 		  /* Here we analyze the different protocols the server allows. */
 		  if (ssh_analyze_banner(session, 0, &ssh1, &ssh2) < 0) {
@@ -633,11 +675,17 @@ void ssh_disconnect(ssh_session session) {
   }
 
   if (session->socket != NULL && ssh_socket_is_open(session->socket)) {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     rc = ssh_buffer_pack(session->out_buffer,
                          "bds",
                          SSH2_MSG_DISCONNECT,
                          SSH2_DISCONNECT_BY_APPLICATION,
                          "Bye Bye");
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
     if (rc != SSH_OK){
       ssh_set_error_oom(session);
       goto error;

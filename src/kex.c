@@ -380,6 +380,9 @@ SSH_PACKET_CALLBACK(ssh_packet_kexinit){
         }
 
         strings[i] = ssh_string_to_char(str);
+#ifdef __EBCDIC__
+        ssh_string_to_ebcdic(strings[i], strings[i], strlen(strings[i]));
+#endif
         if (strings[i] == NULL) {
             ssh_set_error_oom(session);
             goto error;
@@ -619,6 +622,9 @@ int ssh_send_kex(ssh_session session, int server_kex) {
     if (str == NULL) {
       goto error;
     }
+#ifdef __EBCDIC__
+    ssh_string_from_ebcdic((char*)str->data, (char*)str->data, ntohl(str->size));
+#endif
 
     if (buffer_add_ssh_string(session->out_hashbuf, str) < 0) {
       goto error;

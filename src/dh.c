@@ -801,6 +801,9 @@ int generate_session_keys(ssh_session session) {
     goto error;
   }
 
+ #ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   /* IV */
   if (session->client) {
     rc = generate_one_key(k_string, crypto, &crypto->encryptIV, 'A', crypto->digest_len);
@@ -860,6 +863,9 @@ int generate_session_keys(ssh_session session) {
       goto error;
     }
   }
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 #ifdef DEBUG_CRYPTO
   ssh_print_hexa("Encrypt IV", crypto->encryptIV, crypto->digest_len);

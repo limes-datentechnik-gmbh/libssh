@@ -63,6 +63,11 @@ SSH_PACKET_CALLBACK(ssh_packet_disconnect_callback){
     error = ssh_string_to_char(error_s);
     ssh_string_free(error_s);
   }
+#ifdef __EBCDIC__
+  if (error != NULL) {
+    ssh_string_to_ebcdic(error, error, strlen(error));
+  }
+#endif
   SSH_LOG(SSH_LOG_PACKET, "Received SSH_MSG_DISCONNECT %d:%s",
                           code, error != NULL ? error : "no error");
   ssh_set_error(session, SSH_FATAL,
@@ -134,6 +139,9 @@ error:
 SSH_PACKET_CALLBACK(ssh_packet_newkeys){
   ssh_string sig_blob = NULL;
   int rc;
+#ifdef __EBCDIC__
+  char* str;
+#endif
   (void)packet;
   (void)user;
   (void)type;
@@ -183,6 +191,28 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
 
     /* check if public key from server matches user preferences */
     if (session->opts.wanted_methods[SSH_HOSTKEYS]) {
+#ifdef __EBCDIC__
+        str = strdup(key->type_c);
+        if (str == NULL) {
+            ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
+            ssh_key_free(key);
+            return -1;
+        }
+        ssh_string_to_ebcdic(str, str, strlen(str));
+        if(!ssh_match_group(session->opts.wanted_methods[SSH_HOSTKEYS],
+                            str)) {
+            ssh_set_error(session,
+                          SSH_FATAL,
+                          "Public key from server (%s) doesn't match user "
+                          "preference (%s)",
+                          str,
+                          session->opts.wanted_methods[SSH_HOSTKEYS]);
+            free(str);
+            ssh_key_free(key);
+            return -1;
+        }
+        free(str);
+#else
         if(!ssh_match_group(session->opts.wanted_methods[SSH_HOSTKEYS],
                             key->type_c)) {
             ssh_set_error(session,
@@ -194,6 +224,7 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
             ssh_key_free(key);
             return -1;
         }
+#endif /* __EBCDIC */
     }
 
     rc = ssh_pki_signature_verify_blob(session,

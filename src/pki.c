@@ -203,6 +203,9 @@ enum ssh_keytypes_e ssh_key_type(const ssh_key key){
  * @return              A string for the keytype or NULL if unknown.
  */
 const char *ssh_key_type_to_char(enum ssh_keytypes_e type) {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   switch (type) {
     case SSH_KEYTYPE_DSS:
       return "ssh-dss";
@@ -217,6 +220,9 @@ const char *ssh_key_type_to_char(enum ssh_keytypes_e type) {
     case SSH_KEYTYPE_UNKNOWN:
       return NULL;
   }
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
   /* We should never reach this */
   return NULL;
@@ -233,6 +239,33 @@ enum ssh_keytypes_e ssh_key_type_from_name(const char *name) {
     if (name == NULL) {
         return SSH_KEYTYPE_UNKNOWN;
     }
+
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+    // On EBCDIC, compare in Latin-1 first
+    if (strcmp(name, "rsa1") == 0) {
+        return SSH_KEYTYPE_RSA1;
+    } else if (strcmp(name, "rsa") == 0) {
+        return SSH_KEYTYPE_RSA;
+    } else if (strcmp(name, "dsa") == 0) {
+        return SSH_KEYTYPE_DSS;
+    } else if (strcmp(name, "ssh-rsa1") == 0) {
+        return SSH_KEYTYPE_RSA1;
+    } else if (strcmp(name, "ssh-rsa") == 0) {
+        return SSH_KEYTYPE_RSA;
+    } else if (strcmp(name, "ssh-dss") == 0) {
+        return SSH_KEYTYPE_DSS;
+    } else if (strcmp(name, "ssh-ecdsa") == 0
+            || strcmp(name, "ecdsa") == 0
+            || strcmp(name, "ecdsa-sha2-nistp256") == 0
+            || strcmp(name, "ecdsa-sha2-nistp384") == 0
+            || strcmp(name, "ecdsa-sha2-nistp521") == 0) {
+        return SSH_KEYTYPE_ECDSA;
+    } else if (strcmp(name, "ssh-ed25519") == 0){
+        return SSH_KEYTYPE_ED25519;
+    }
+#pragma convert(pop)
+#endif
 
     if (strcmp(name, "rsa1") == 0) {
         return SSH_KEYTYPE_RSA1;
@@ -1372,16 +1405,32 @@ int ssh_pki_signature_verify_blob(ssh_session session,
 {
     ssh_signature sig;
     int rc;
+#ifdef __EBCDIC__
+  char* str;
+#endif
 
     rc = ssh_pki_import_signature_blob(sig_blob, key, &sig);
     if (rc < 0) {
         return SSH_ERROR;
     }
 
+#ifdef __EBCDIC__
+#pragma convert(pop)
+    str = strdup(key->type_c);
+    if (str == NULL) {
+        ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
+        return -1;
+    }
+    ssh_string_to_ebcdic(str, str, strlen(str));
+    SSH_LOG(SSH_LOG_FUNCTIONS,
+            "Going to verify a %s type signature",
+            str);
+  free(str);
+#else
     SSH_LOG(SSH_LOG_FUNCTIONS,
             "Going to verify a %s type signature",
             key->type_c);
-
+#endif
 
     if (key->type == SSH_KEYTYPE_ECDSA) {
 #if HAVE_ECC

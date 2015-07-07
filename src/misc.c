@@ -289,6 +289,211 @@ int ssh_is_ipaddr(const char *str) {
 
 #endif /* _WIN32 */
 
+#ifdef __EBCDIC__
+/*-
+ * License for strtol()
+ * Copyright (c) 1990, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Berkeley and its contributors.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+
+static inline int isupper_ascii(char c) {
+    return (c >= 0x41 && c <= 0x5A); /* 'A' - 'Z' */
+}
+
+static inline int isalpha_ascii(char c) {
+    return ((c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A)); /* 'A' - 'Z' || 'a' - 'z' */
+}
+
+static inline int isspace_ascii(char c) {
+    return (c == 0x20 || c == 0x09 || c == 0x0A); /* ' ', '\t', '\n' */
+}
+
+static inline int isdigit_ascii(char c) {
+    return (c >= 0x30 && c <= 0x39); /* '0' - '9' */
+}
+
+/*
+ * Convert an ASCII string to a long integer.
+ *
+ * Treats the string as ASCII, even on EBCDIC systems.
+ */
+long strtol_ascii(const char *nptr, char **endptr, int base) {
+    register const char *s = nptr;
+    register unsigned long acc;
+    register int c;
+    register unsigned long cutoff;
+    register int neg = 0, any, cutlim;
+
+    /*
+     * Skip white space and pick up leading +/- sign if any.
+     * If base is 0, allow 0x for hex and 0 for octal, else
+     * assume decimal; if base is already 16, allow 0x.
+     */
+    do {
+        c = *s++;
+    } while (isspace_ascii(c));
+    if (c == 0x2D) { /* '-' */
+        neg = 1;
+        c = *s++;
+    } else if (c == 0x2B) /* '+' */
+        c = *s++;
+    if ((base == 0 || base == 16) &&
+        c == 0x30 && (*s == 0x78 || *s == 0x58)) { /* '0', 'x', 'X' */
+        c = s[1];
+        s += 2;
+        base = 16;
+    } else if ((base == 0 || base == 2) &&
+        c == 0x30 && (*s == 0x62 || *s == 0x42)) { /* '0', 'b', 'B' */
+        c = s[1];
+        s += 2;
+        base = 2;
+    }
+    if (base == 0)
+        base = c == 0x30 ? 8 : 10; /* '0' */
+
+    /*
+     * Compute the cutoff value between legal numbers and illegal
+     * numbers.  That is the largest legal value, divided by the
+     * base.  An input number that is greater than this value, if
+     * followed by a legal input character, is too big.  One that
+     * is equal to this value may be valid or not; the limit
+     * between valid and invalid numbers is then based on the last
+     * digit.  For instance, if the range for longs is
+     * [-2147483648..2147483647] and the input base is 10,
+     * cutoff will be set to 214748364 and cutlim to either
+     * 7 (neg==0) or 8 (neg==1), meaning that if we have accumulated
+     * a value > 214748364, or equal but the next digit is > 7 (or 8),
+     * the number is too big, and we will return a range error.
+     *
+     * Set any if any `digits' consumed; make it negative to indicate
+     * overflow.
+     */
+    cutoff = neg ? -(unsigned long)LONG_MIN : LONG_MAX;
+    cutlim = cutoff % (unsigned long)base;
+    cutoff /= (unsigned long)base;
+    for (acc = 0, any = 0;; c = *s++) {
+        if (isdigit_ascii(c))
+            c -= 0x30; /* '0' */
+        else if (isalpha_ascii(c))
+            c -= isupper_ascii(c) ? 0x41 - 10 : 0x61 - 10; /* 'A', 'a' */
+        else
+            break;
+        if (c >= base)
+            break;
+        if (any < 0 || acc > cutoff || acc == cutoff && c > cutlim)
+            any = -1;
+        else {
+            any = 1;
+            acc *= base;
+            acc += c;
+        }
+    }
+    if (any < 0) {
+        acc = neg ? LONG_MIN : LONG_MAX;
+    // errno = ERANGE;
+    } else if (neg)
+        acc = -acc;
+    if (endptr != 0)
+        *endptr = (char *)(any ? s - 1 : nptr);
+    return (acc);
+}
+
+/*
+ * Convert a string to an unsigned long integer.
+ *
+ * Ignores `locale' stuff.  Assumes that the upper and lower case
+ * alphabets and digits are each contiguous.
+ */
+unsigned long strtoul(const char *nptr, char **endptr, int base) {
+    register const char *s = nptr;
+    register unsigned long acc;
+    register int c;
+    register unsigned long cutoff;
+    register int neg = 0, any, cutlim;
+
+    /*
+     * See strtol for comments as to the logic used.
+     */
+    do {
+        c = *s++;
+    } while (isspace_ascii(c));
+    if (c == 0x2D) { /* '-' */
+        neg = 1;
+        c = *s++;
+    } else if (c == 0x2B) /* '+' */
+        c = *s++;
+    if ((base == 0 || base == 16) &&
+        c == 0x30 && (*s == 0x78 || *s == 0x58)) { /* '0', 'x', 'X' */
+        c = s[1];
+        s += 2;
+        base = 16;
+    } else if ((base == 0 || base == 2) &&
+        c == 0x30 && (*s == 0x62 || *s == 0x42)) { /* '0', 'b', 'B' */
+        c = s[1];
+        s += 2;
+        base = 2;
+    }
+    if (base == 0)
+        base = c == 0x30 ? 8 : 10; /* '0' */
+    cutoff = (unsigned long)ULONG_MAX / (unsigned long)base;
+    cutlim = (unsigned long)ULONG_MAX % (unsigned long)base;
+    for (acc = 0, any = 0;; c = *s++) {
+        if (isdigit_ascii(c))
+            c -= 0x30; /* '0' */
+        else if (isalpha_ascii(c))
+            c -= isupper_ascii(c) ? 0x41 - 10 : 0x61 - 10; /* 'A', 'a' */
+        else
+            break;
+        if (c >= base)
+            break;
+        if (any < 0 || acc > cutoff || acc == cutoff && c > cutlim)
+            any = -1;
+        else {
+            any = 1;
+            acc *= base;
+            acc += c;
+        }
+    }
+    if (any < 0) {
+        acc = ULONG_MAX;
+    // errno = ERANGE;
+    } else if (neg)
+        acc = -acc;
+    if (endptr != 0)
+        *endptr = (char *)(any ? s - 1 : nptr);
+    return (acc);
+}
+#endif /* __EBCDIC__ */
+
 #ifndef HAVE_NTOHLL
 uint64_t ntohll(uint64_t a) {
 #ifdef WORDS_BIGENDIAN
@@ -811,6 +1016,9 @@ char *ssh_path_expand_escape(ssh_session session, const char *s) {
 int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
   const char *banner;
   const char *openssh;
+#ifdef __EBCDIC__
+  char* str;
+#endif
 
   if (server) {
       banner = session->clientbanner;
@@ -832,15 +1040,45 @@ int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
    * SSH-2.0-something
    * 012345678901234567890
    */
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   if (strlen(banner) < 6 ||
       strncmp(banner, "SSH-", 4) != 0) {
+#ifdef __EBCDIC__
+#pragma convert(pop)
+    str = strdup(banner);
+    if (str == NULL) {
+        ssh_set_error(session, SSH_FATAL, "Memory allocation failed for banner");
+        return -1;;
+    }
+    ssh_string_to_ebcdic(str, str, strlen(str));
+    ssh_set_error(session, SSH_FATAL, "Protocol mismatch: %s", str);
+    free(str);
+#else
     ssh_set_error(session, SSH_FATAL, "Protocol mismatch: %s", banner);
+#endif
     return -1;
   }
 
+#ifdef __EBCDIC__
+#pragma convert(pop)
+  str = strdup(banner);
+  if (str == NULL) {
+      ssh_set_error(session, SSH_FATAL, "Memory allocation failed for banner");
+      return -1;
+  }
+  ssh_string_to_ebcdic(str, str, strlen(str));
+  SSH_LOG(SSH_LOG_RARE, "Analyzing banner: %s", str);
+  free(str);
+#else
   SSH_LOG(SSH_LOG_RARE, "Analyzing banner: %s", banner);
+#endif
 
   switch(banner[4]) {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     case '1':
       *ssh1 = 1;
       if (strlen(banner) > 6) {
@@ -855,12 +1093,21 @@ int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
       *ssh1 = 0;
       *ssh2 = 1;
       break;
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
     default:
       ssh_set_error(session, SSH_FATAL, "Protocol mismatch: %s", banner);
       return -1;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   openssh = strstr(banner, "OpenSSH");
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
   if (openssh != NULL) {
       int major, minor;
 
@@ -870,8 +1117,13 @@ int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
        * 012345678901234567890
        */
       if (strlen(openssh) > 9) {
+#ifdef __EBCDIC__
+          major = strtol_ascii(openssh + 8, (char **) NULL, 10);
+          minor = strtol_ascii(openssh + 10, (char **) NULL, 10);
+#else
           major = strtol(openssh + 8, (char **) NULL, 10);
           minor = strtol(openssh + 10, (char **) NULL, 10);
+#endif
           session->openssh = SSH_VERSION_INT(major, minor, 0);
           SSH_LOG(SSH_LOG_RARE,
                   "We are talking to an OpenSSH client version: %d.%d (%x)",
