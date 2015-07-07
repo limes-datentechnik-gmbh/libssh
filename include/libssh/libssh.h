@@ -641,6 +641,11 @@ LIBSSH_API ssh_string ssh_string_new(size_t size);
 LIBSSH_API const char *ssh_string_get_char(ssh_string str);
 LIBSSH_API char *ssh_string_to_char(ssh_string str);
 LIBSSH_API void ssh_string_free_char(char *s);
+#ifdef __EBCDIC__
+LIBSSH_API void ssh_string_from_ebcdic(const char* ebcdic, char* ascii, unsigned int len);
+LIBSSH_API void ssh_string_to_ebcdic(const char* ascii, char* ebcdic, unsigned int len);
+LIBSSH_API char* ssh_string_for_log(const char* ascii);
+#endif
 
 LIBSSH_API int ssh_getpass(const char *prompt, char *buf, size_t len, int echo,
     int verify);
