@@ -377,26 +377,20 @@ void ssh_string_from_ebcdic(const char* ebcdic, char* ascii, unsigned int len) {
          case 'x'  : ascii[i]=0x78; break;
          case 'y'  : ascii[i]=0x79; break;
          case 'z'  : ascii[i]=0x7A; break;
+
+         case 0x7C : // one of both is the @ character
+         case 0xB5 : ascii[i]=0x40; break;
          default   : ascii[i]=0x5F; break;
       }
    }
 }
 
-/**
- * @brief Convert an ASCII string to EBCDIC (supports only non-diacritic characters).
- *
- * \param[in] ascii     The ASCII string to convert.
- * \param[out] ebcdic   Buffer that has enough room for len EBCDIC characters
- * \param[in] len       Length of the input string
- */
-void ssh_string_to_ebcdic(const char* ascii, char* ebcdic, unsigned int len) {
-   unsigned int i;
-   static const char ascii_map[256]={
+static const char ascii_map[256]={
    '_','_','_','_','_','_','_','_','_','_','\n','_','_','\r','_','_',
    '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
    ' ','_','\"','_','$','%','&','\'','(',')','*','+',',','-','.','/',
    '0','1','2','3','4','5','6','7','8','9',':',';','<','=','>','?',
-   '_','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
+   '@','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
    'P','Q','R','S','T','U','V','W','X','Y','Z','_','/','_','_','_',
    '_','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o',
    'p','q','r','s','t','u','v','w','x','y','z','_','_','_','_','_',
@@ -407,7 +401,19 @@ void ssh_string_to_ebcdic(const char* ascii, char* ebcdic, unsigned int len) {
    '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
    '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
    '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_'};
+   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_'
+};
+
+/**
+ * @brief Convert an ASCII string to EBCDIC (supports only non-diacritic characters).
+ *
+ * \param[in] ascii     The ASCII string to convert.
+ * \param[out] ebcdic   Buffer that has enough room for len EBCDIC characters
+ * \param[in] len       Length of the input string
+ */
+void ssh_string_to_ebcdic(const char* ascii, char* ebcdic, unsigned int len) {
+   unsigned int i;
+
    for (i=0;i<len;i++) {
       ebcdic[i]=ascii_map[*((unsigned char*)(ascii+i))];
    }
@@ -422,24 +428,8 @@ void ssh_string_to_ebcdic(const char* ascii, char* ebcdic, unsigned int len) {
 char* ssh_string_for_log(const char* ascii) {
    unsigned int i;
    static char ebcdic[4096];
-   static const char ascii_map[256]={
-   '_','_','_','_','_','_','_','_','_','_','\n','_','_','\r','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   ' ','_','\"','_','$','%','&','\'','(',')','*','+',',','-','.','/',
-   '0','1','2','3','4','5','6','7','8','9',':',';','<','=','>','?',
-   '_','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
-   'P','Q','R','S','T','U','V','W','X','Y','Z','_','/','_','_','_',
-   '_','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o',
-   'p','q','r','s','t','u','v','w','x','y','z','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_',
-   '_','_','_','_','_','_','_','_','_','_','_','_','_','_','_','_'};
-   for (i=0; ascii[i]!='\0'; i++) {
+
+   for (i=0; ascii[i]!='\0' && i < sizeof(ebcdic)-1; i++) {
       ebcdic[i]=ascii_map[*((unsigned char*)(ascii+i))];
    }
    ebcdic[i]='\0';
