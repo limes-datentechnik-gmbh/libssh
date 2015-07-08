@@ -641,23 +641,24 @@ int ssh_get_openssh_version(ssh_session session) {
 void ssh_disconnect(ssh_session session) {
   struct ssh_iterator *it;
   int rc;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+  const char* bye_msg = "Bye Bye";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
   if (session == NULL) {
     return;
   }
 
   if (session->socket != NULL && ssh_socket_is_open(session->socket)) {
-#ifdef __EBCDIC__
-#pragma convert("ISO8859-1")
-#endif
     rc = ssh_buffer_pack(session->out_buffer,
                          "bds",
                          SSH2_MSG_DISCONNECT,
                          SSH2_DISCONNECT_BY_APPLICATION,
-                         "Bye Bye");
-#ifdef __EBCDIC__
-#pragma convert(pop)
-#endif
+                         bye_msg);
     if (rc != SSH_OK){
       ssh_set_error_oom(session);
       goto error;
