@@ -1017,9 +1017,6 @@ char *ssh_path_expand_escape(ssh_session session, const char *s) {
 int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
   const char *banner;
   const char *openssh;
-#ifdef __EBCDIC__
-  char* str;
-#endif
 
   if (server) {
       banner = session->clientbanner;
@@ -1041,40 +1038,19 @@ int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
    * SSH-2.0-something
    * 012345678901234567890
    */
+  if (strlen(banner) < 6 ||
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
-  if (strlen(banner) < 6 ||
       strncmp(banner, "SSH-", 4) != 0) {
 #ifdef __EBCDIC__
 #pragma convert(pop)
-    str = strdup(banner);
-    if (str == NULL) {
-        ssh_set_error(session, SSH_FATAL, "Memory allocation failed for banner");
-        return -1;;
-    }
-    ssh_string_to_ebcdic(str, str, strlen(str));
-    ssh_set_error(session, SSH_FATAL, "Protocol mismatch: %s", str);
-    free(str);
-#else
-    ssh_set_error(session, SSH_FATAL, "Protocol mismatch: %s", banner);
 #endif
+    ssh_set_error(session, SSH_FATAL, "Protocol mismatch: %s", ssh_string_for_log(banner));
     return -1;
   }
 
-#ifdef __EBCDIC__
-#pragma convert(pop)
-  str = strdup(banner);
-  if (str == NULL) {
-      ssh_set_error(session, SSH_FATAL, "Memory allocation failed for banner");
-      return -1;
-  }
-  ssh_string_to_ebcdic(str, str, strlen(str));
-  SSH_LOG(SSH_LOG_RARE, "Analyzing banner: %s", str);
-  free(str);
-#else
-  SSH_LOG(SSH_LOG_RARE, "Analyzing banner: %s", banner);
-#endif
+  SSH_LOG(SSH_LOG_RARE, "Analyzing banner: %s", ssh_string_for_log(banner));
 
   switch(banner[4]) {
 #ifdef __EBCDIC__

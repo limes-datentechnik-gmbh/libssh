@@ -126,16 +126,8 @@ static int callback_receive_banner(const void *data, size_t len, void *user) {
   		session->session_state=SSH_SESSION_STATE_BANNER_RECEIVED;
 #ifdef __EBCDIC__
 #pragma convert(pop)
-        str = strdup(buffer);
-        if (str == NULL) {
-            return SSH_ERROR;
-        }
-        ssh_string_to_ebcdic(str, str, strlen(str));
 #endif
-        SSH_LOG(SSH_LOG_PACKET,"Received banner: %s",str);
-#ifdef __EBCDIC__
-        free(str);
-#endif
+        SSH_LOG(SSH_LOG_PACKET,"Received banner: %s",ssh_string_for_log(str));
 		session->ssh_connection_callback(session);
 
   		return ret;
@@ -311,13 +303,8 @@ int ssh_service_request(ssh_session session, const char *service) {
       return SSH_ERROR;
   }
 
-#ifdef __EBCDIC__
   SSH_LOG(SSH_LOG_PACKET,
       "Sent SSH_MSG_SERVICE_REQUEST (service %s)", ssh_string_for_log(service));
-#else
-  SSH_LOG(SSH_LOG_PACKET,
-      "Sent SSH_MSG_SERVICE_REQUEST (service %s)", service);
-#endif
 pending:
   rc=ssh_handle_packets_termination(session,SSH_TIMEOUT_USER,
       ssh_service_request_termination, session);
@@ -358,9 +345,6 @@ pending:
  */
 static void ssh_client_connection_callback(ssh_session session){
 	int ssh1,ssh2;
-#ifdef __EBCDIC__
-	char* banner;
-#endif
 
 	switch(session->session_state){
 		case SSH_SESSION_STATE_NONE:
@@ -372,20 +356,8 @@ static void ssh_client_connection_callback(ssh_session session){
 		    goto error;
 		  }
 		  set_status(session, 0.4f);
-#ifdef __EBCDIC__
-		  banner = strdup(session->serverbanner);
-		  if (banner == NULL) {
-		    ssh_set_error(session, SSH_FATAL,
-		        "Memory allocation failed for banner");
-		    goto error;
-		  }
-		  ssh_string_to_ebcdic(banner, banner, strlen(banner));
-		  SSH_LOG(SSH_LOG_RARE, "SSH server banner: %s", banner);
-		  free(banner);
-#else
 		  SSH_LOG(SSH_LOG_RARE,
-		      "SSH server banner: %s", session->serverbanner);
-#endif
+		      "SSH server banner: %s", ssh_string_for_log(session->serverbanner));
 
 		  /* Here we analyze the different protocols the server allows. */
 		  if (ssh_analyze_banner(session, 0, &ssh1, &ssh2) < 0) {
@@ -411,7 +383,7 @@ static void ssh_client_connection_callback(ssh_session session){
 		  } else {
 		    ssh_set_error(session, SSH_FATAL,
 		        "No version of SSH protocol usable (banner: %s)",
-		        session->serverbanner);
+		        ssh_string_for_log(session->serverbanner));
 		    goto error;
 		  }
 		  /* from now, the packet layer is handling incoming packets */
