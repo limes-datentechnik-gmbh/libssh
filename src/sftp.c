@@ -48,6 +48,30 @@
 #endif
 #endif
 
+#ifdef __EBCDIC__
+// The values of the file type flags are not defined in POSIX
+// On z/OS, we must redefine these flags to the UNIX values to decode
+// file attributes correctly
+#undef S_IFMT
+#undef S_IFSOCK
+#undef S_IFLNK
+#undef S_IFREG
+#undef S_IFBLK
+#undef S_IFDIR
+#undef S_IFCHR
+#undef S_IFIFO
+#undef S_ISVTX
+#define S_IFMT   00170000
+#define S_IFSOCK 0140000
+#define S_IFLNK  0120000
+#define S_IFREG  0100000
+#define S_IFBLK  0060000
+#define S_IFDIR  0040000
+#define S_IFCHR  0020000
+#define S_IFIFO  0010000
+#define S_ISVTX  0001000
+#endif
+
 #include "libssh/priv.h"
 #include "libssh/ssh2.h"
 #include "libssh/sftp.h"
@@ -512,6 +536,9 @@ int sftp_init(sftp_session sftp) {
   char *ext_data = NULL;
   uint32_t version;
   int rc;
+#ifdef __EBCDIC
+  char *ext_data_ebcdic = NULL;
+#endif
 
   buffer = ssh_buffer_new();
   if (buffer == NULL) {
@@ -561,9 +588,18 @@ int sftp_init(sftp_session sftp) {
       break;
     }
 
+#ifdef __EBCDIC
+    ext_data_ebcdic = strdup(ssh_string_for_log(ext_data));
+    SSH_LOG(SSH_LOG_RARE,
+        "SFTP server extension: %s, version: %s",
+        ssh_string_for_log(ext_name), ext_data_ebcdic==NULL?"N/A":ext_data_ebcdic);
+    if (ext_data_ebcdic != NULL)
+      free(ext_data_ebcdic);
+#else
     SSH_LOG(SSH_LOG_RARE,
         "SFTP server extension: %s, version: %s",
         ext_name, ext_data);
+#endif
 
     count++;
     tmp = realloc(sftp->ext->name, count * sizeof(char *));
@@ -787,6 +823,7 @@ static sftp_status_message parse_status_msg(sftp_message msg){
   rc = ssh_buffer_unpack(msg->payload, "ss",
           &status->errormsg,
           &status->langmsg);
+  // NOTE: status->langmsg unused
 
   if(rc != SSH_OK && msg->sftp->version >=3){
       /* These are mandatory from version 3 */
@@ -797,6 +834,10 @@ static sftp_status_message parse_status_msg(sftp_message msg){
   }
   if (status->errormsg == NULL)
     status->errormsg = strdup("No error message in packet");
+#ifdef __EBCDIC__
+  else
+    ssh_string_to_ebcdic(status->errormsg, status->errormsg, strlen(status->errormsg));
+#endif
   if (status->langmsg == NULL)
     status->langmsg = strdup("");
   if (status->errormsg == NULL || status->langmsg == NULL) {
@@ -1125,6 +1166,10 @@ enum sftp_longname_field_e {
   SFTP_LONGNAME_NAME,
 };
 
+static int isspace_ascii ( int c ) {
+    return c == 0x20 || (c >= 0x09 && c <= 0x0D);
+}
+
 static char *sftp_parse_longname(const char *longname,
         enum sftp_longname_field_e longname_field) {
     const char *p, *q;
@@ -1134,10 +1179,10 @@ static char *sftp_parse_longname(const char *longname,
     p = longname;
     /* Find the beginning of the field which is specified by sftp_longanme_field_e. */
     while(field != longname_field) {
-        if(isspace(*p)) {
+        if(isspace_ascii(*p)) {
             field++;
             p++;
-            while(*p && isspace(*p)) {
+            while(*p && isspace_ascii(*p)) {
                 p++;
             }
         } else {
@@ -1146,7 +1191,7 @@ static char *sftp_parse_longname(const char *longname,
     }
 
     q = p;
-    while (! isspace(*q)) {
+    while (! isspace_ascii(*q)) {
         q++;
     }
 
@@ -1196,7 +1241,7 @@ static sftp_attributes sftp_parse_attr_3(sftp_session sftp, ssh_buffer buf,
         if (rc != SSH_OK){
             goto error;
         }
-        SSH_LOG(SSH_LOG_RARE, "Name: %s", attr->name);
+        SSH_LOG(SSH_LOG_RARE, "Name: %s", ssh_string_for_log(attr->name));
 
         /* Set owner and group if we talk to openssh and have the longname */
         if (ssh_get_openssh_version(sftp->session)) {
@@ -1217,7 +1262,7 @@ static sftp_attributes sftp_parse_attr_3(sftp_session sftp, ssh_buffer buf,
         goto error;
     }
     SSH_LOG(SSH_LOG_RARE,
-            "Flags: %.8lx\n", (long unsigned int) attr->flags);
+            "Flags: %.8lx", (long unsigned int) attr->flags);
 
     if (attr->flags & SSH_FILEXFER_ATTR_SIZE) {
         rc = ssh_buffer_unpack(buf, "q", &attr->size);
@@ -1225,7 +1270,7 @@ static sftp_attributes sftp_parse_attr_3(sftp_session sftp, ssh_buffer buf,
             goto error;
         }
         SSH_LOG(SSH_LOG_RARE,
-                "Size: %llu\n",
+                "Size: %llu",
                 (long long unsigned int) attr->size);
     }
 
@@ -1264,6 +1309,7 @@ static sftp_attributes sftp_parse_attr_3(sftp_session sftp, ssh_buffer buf,
             attr->type = SSH_FILEXFER_TYPE_UNKNOWN;
             break;
         }
+         SSH_LOG(SSH_LOG_RARE, "Type: %d", attr->type);
     }
 
     if (attr->flags & SSH_FILEXFER_ATTR_ACMODTIME) {
@@ -1651,7 +1697,7 @@ sftp_file sftp_open(sftp_session sftp, const char *file, int flags,
     sftp_flags |= SSH_FXF_TRUNC;
   if (flags & O_EXCL)
     sftp_flags |= SSH_FXF_EXCL;
-  SSH_LOG(SSH_LOG_PACKET,"Opening file %s with sftp flags %x",file,sftp_flags);
+  SSH_LOG(SSH_LOG_PACKET,"Opening file %s with sftp flags %x",ssh_string_for_log(file),sftp_flags);
   id = sftp_get_new_id(sftp);
   if (buffer_add_u32(buffer, htonl(id)) < 0 ||
       buffer_add_ssh_string(buffer, filename) < 0) {
@@ -2721,7 +2767,13 @@ sftp_statvfs_t sftp_statvfs(sftp_session sftp, const char *path) {
     return NULL;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   ext = ssh_string_from_char("statvfs@openssh.com");
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
   if (ext == NULL) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
@@ -2808,7 +2860,13 @@ sftp_statvfs_t sftp_fstatvfs(sftp_file file) {
     return NULL;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   ext = ssh_string_from_char("fstatvfs@openssh.com");
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
   if (ext == NULL) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
