@@ -300,7 +300,7 @@ static int channel_open(ssh_channel channel, const char *type, int window,
 
   SSH_LOG(SSH_LOG_PACKET,
       "Sent a SSH_MSG_CHANNEL_OPEN type %s for channel %d",
-      type, channel->local_channel);
+      ssh_string_for_log(type), channel->local_channel);
 pending:
   /* wait until channel is opened by server */
   err = ssh_handle_packets_termination(session,
@@ -662,6 +662,10 @@ SSH_PACKET_CALLBACK(channel_rcv_request) {
 		SSH_LOG(SSH_LOG_PACKET, "Invalid MSG_CHANNEL_REQUEST");
 		return SSH_PACKET_USED;
 	}
+#ifdef __EBCDIC__
+    if (request != NULL)
+        ssh_string_to_ebcdic(request, request, strlen(request));
+#endif
 
 	if (strcmp(request,"exit-status") == 0) {
         SAFE_FREE(request);
@@ -689,6 +693,10 @@ SSH_PACKET_CALLBACK(channel_rcv_request) {
 			SSH_LOG(SSH_LOG_PACKET, "Invalid MSG_CHANNEL_REQUEST");
 			return SSH_PACKET_USED;
 		}
+#ifdef __EBCDIC__
+    if (sig != NULL)
+        ssh_string_to_ebcdic(sig, sig, strlen(sig));
+#endif
 
 		SSH_LOG(SSH_LOG_PACKET,
 				"Remote connection sent a signal SIG %s", sig);
@@ -721,6 +729,10 @@ SSH_PACKET_CALLBACK(channel_rcv_request) {
 			SSH_LOG(SSH_LOG_PACKET, "Invalid MSG_CHANNEL_REQUEST");
 			return SSH_PACKET_USED;
 		}
+#ifdef __EBCDIC__
+        if (sig != NULL)
+            ssh_string_to_ebcdic(sig, sig, strlen(sig));
+#endif
 
 		if (core_dumped == 0) {
 			core = "";
@@ -868,11 +880,17 @@ int ssh_channel_open_session(ssh_channel channel) {
   }
 #endif
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   return channel_open(channel,
                       "session",
                       CHANNEL_INITIAL_WINDOW,
                       CHANNEL_MAX_PACKET,
                       NULL);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 }
 
 /**
@@ -901,11 +919,17 @@ int ssh_channel_open_auth_agent(ssh_channel channel){
   }
 #endif
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   return channel_open(channel,
                       "auth-agent@openssh.com",
                       CHANNEL_INITIAL_WINDOW,
                       CHANNEL_MAX_PACKET,
                       NULL);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 }
 
 
@@ -969,11 +993,17 @@ int ssh_channel_open_forward(ssh_channel channel, const char *remotehost,
     goto error;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_open(channel,
                     "direct-tcpip",
                     CHANNEL_INITIAL_WINDOW,
                     CHANNEL_MAX_PACKET,
                     payload);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 error:
   ssh_buffer_free(payload);
@@ -1552,7 +1582,7 @@ static int channel_request(ssh_channel channel, const char *request,
   }
 
   SSH_LOG(SSH_LOG_PACKET,
-      "Sent a SSH_MSG_CHANNEL_REQUEST %s", request);
+      "Sent a SSH_MSG_CHANNEL_REQUEST %s", ssh_string_for_log(request));
   if (reply == 0) {
     channel->request_state = SSH_CHANNEL_REQ_STATE_NONE;
     return SSH_OK;
@@ -1573,12 +1603,12 @@ pending:
       break;
     case SSH_CHANNEL_REQ_STATE_DENIED:
       ssh_set_error(session, SSH_REQUEST_DENIED,
-          "Channel request %s failed", request);
+          "Channel request %s failed", ssh_string_for_log(request));
       rc=SSH_ERROR;
       break;
     case SSH_CHANNEL_REQ_STATE_ACCEPTED:
       SSH_LOG(SSH_LOG_PROTOCOL,
-          "Channel request %s success",request);
+          "Channel request %s success",ssh_string_for_log(request));
       rc=SSH_OK;
       break;
     case SSH_CHANNEL_REQ_STATE_PENDING:
@@ -1666,7 +1696,13 @@ int ssh_channel_request_pty_size(ssh_channel channel, const char *terminal,
     goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "pty-req", buffer, 1);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
 
@@ -1686,7 +1722,13 @@ error:
  * @see ssh_channel_request_pty_size()
  */
 int ssh_channel_request_pty(ssh_channel channel) {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   return ssh_channel_request_pty_size(channel, "xterm", 80, 24);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 }
 
 /**
@@ -1734,7 +1776,13 @@ int ssh_channel_change_pty_size(ssh_channel channel, int cols, int rows) {
     goto error;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "window-change", buffer, 0);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
 
@@ -1760,7 +1808,13 @@ int ssh_channel_request_shell(ssh_channel channel) {
     return channel_request_shell1(channel);
   }
 #endif
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   return channel_request(channel, "shell", NULL, 1);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 }
 
 /**
@@ -1807,7 +1861,13 @@ int ssh_channel_request_subsystem(ssh_channel channel, const char *subsys) {
     goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "subsystem", buffer, 1);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
 
@@ -1818,11 +1878,23 @@ int ssh_channel_request_sftp( ssh_channel channel){
     if(channel == NULL) {
         return SSH_ERROR;
     }
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     return ssh_channel_request_subsystem(channel, "sftp");
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 }
 
 static char *generate_cookie(void) {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   static const char *hex = "0123456789abcdef";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
   char s[36];
   unsigned char rnd[16];
   int i;
@@ -1891,10 +1963,18 @@ int ssh_channel_request_x11(ssh_channel channel, int single_connection, const ch
     }
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+  if (protocol == NULL)
+    protocol = "MIT-MAGIC-COOKIE-1";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
   rc = ssh_buffer_pack(buffer,
                        "bssd",
                        single_connection == 0 ? 0 : 1,
-                       protocol ? protocol : "MIT-MAGIC-COOKIE-1",
+                       protocol,
                        cookie ? cookie : c,
                        screen_number);
   if (c != NULL){
@@ -1905,7 +1985,13 @@ int ssh_channel_request_x11(ssh_channel channel, int single_connection, const ch
     goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "x11-req", buffer, 1);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 error:
   ssh_buffer_free(buffer);
@@ -2102,7 +2188,7 @@ static int global_request(ssh_session session, const char *request,
   }
 
   SSH_LOG(SSH_LOG_PACKET,
-      "Sent a SSH_MSG_GLOBAL_REQUEST %s", request);
+      "Sent a SSH_MSG_GLOBAL_REQUEST %s", ssh_string_for_log(request));
 
   if (reply == 0) {
       session->global_req_state = SSH_CHANNEL_REQ_STATE_NONE;
@@ -2120,14 +2206,14 @@ pending:
   }
   switch(session->global_req_state){
     case SSH_CHANNEL_REQ_STATE_ACCEPTED:
-      SSH_LOG(SSH_LOG_PROTOCOL, "Global request %s success",request);
+      SSH_LOG(SSH_LOG_PROTOCOL, "Global request %s success",ssh_string_for_log(request));
       rc=SSH_OK;
       break;
     case SSH_CHANNEL_REQ_STATE_DENIED:
       SSH_LOG(SSH_LOG_PACKET,
-          "Global request %s failed", request);
+          "Global request %s failed", ssh_string_for_log(request));
       ssh_set_error(session, SSH_REQUEST_DENIED,
-          "Global request %s failed", request);
+          "Global request %s failed", ssh_string_for_log(request));
       rc=SSH_ERROR;
       break;
     case SSH_CHANNEL_REQ_STATE_ERROR:
@@ -2274,7 +2360,13 @@ int ssh_channel_cancel_forward(ssh_session session,
       goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = global_request(session, "cancel-tcpip-forward", buffer, 1);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 error:
   ssh_buffer_free(buffer);
@@ -2333,7 +2425,13 @@ int ssh_channel_request_env(ssh_channel channel, const char *name, const char *v
     goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "env", buffer,1);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
 
@@ -2407,7 +2505,13 @@ int ssh_channel_request_exec(ssh_channel channel, const char *cmd) {
     goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "exec", buffer, 1);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
   return rc;
@@ -2476,7 +2580,13 @@ int ssh_channel_request_send_signal(ssh_channel channel, const char *sig) {
     goto error;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "signal", buffer, 0);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
   return rc;
@@ -3241,11 +3351,17 @@ int ssh_channel_open_reverse_forward(ssh_channel channel, const char *remotehost
     goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_open(channel,
                     "forwarded-tcpip",
                     CHANNEL_INITIAL_WINDOW,
                     CHANNEL_MAX_PACKET,
                     payload);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 error:
   ssh_buffer_free(payload);
@@ -3303,11 +3419,17 @@ int ssh_channel_open_x11(ssh_channel channel,
     goto error;
   }
 pending:
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_open(channel,
                     "x11",
                     CHANNEL_INITIAL_WINDOW,
                     CHANNEL_MAX_PACKET,
                     payload);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 error:
   ssh_buffer_free(payload);
@@ -3355,7 +3477,13 @@ int ssh_channel_request_send_exit_status(ssh_channel channel, int exit_status) {
     goto error;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "exit-status", buffer, 0);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
   return rc;
@@ -3415,7 +3543,13 @@ int ssh_channel_request_send_exit_signal(ssh_channel channel, const char *sig,
     goto error;
   }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
   rc = channel_request(channel, "exit-signal", buffer, 0);
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 error:
   ssh_buffer_free(buffer);
   return rc;
