@@ -34,6 +34,7 @@
 
 #include "libssh/priv.h"
 #include "libssh/string.h"
+#include "libssh/session.h"
 
 /**
  * @defgroup libssh_string The SSH string functions
@@ -438,6 +439,43 @@ char* ssh_string_for_log(const char* ascii) {
 }
 
 #endif /* __EBCDIC__ */
+
+char* ssh_string_utf8_to_local(ssh_session session, char* utf8) {
+    if (session == NULL || utf8 == NULL) {
+        if (session == NULL)
+            fprintf(stderr, "session==NULL\n");
+        else
+            fprintf(stderr, "utf==NULL\n");
+
+        return NULL;
+    }
+    if (session->opts.utf_to_local_func == NULL) {
+        fprintf(stderr, "No UTF8->local function set\n");
+#ifdef __EBCDIC__
+        // if EBCDIC, let's do at least basic ASCII->EBCDIC conversion
+        ssh_string_to_ecbdic(utf8, utf8, strlen(utf8));
+#endif
+        return utf8; // no conversion function set = no conversion
+    }
+
+    fprintf(stderr, "Doing UTF8->local... UTF-8: %s", utf8);
+    char* r  = session->opts.utf_to_local_func(utf8);
+    fprintf(stderr, " local: %s\n", r);
+    return r;
+}
+
+char* ssh_string_local_to_utf8(ssh_session session, char* local) {
+    if (session == NULL || local == NULL)
+        return NULL;
+    if (session->opts.local_to_utf_func == NULL) {
+#ifdef __EBCDIC__
+        // if EBCDIC, let's do at least basic EBCDIC->ASCII conversion
+        ssh_string_from_ecbdic(utf8, utf8, strlen(utf8));
+#endif
+        return local; // no conversion function set = no conversion
+    }
+    return session->opts.local_to_utf_func(local);
+}
 
 /** @} */
 

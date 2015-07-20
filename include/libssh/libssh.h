@@ -345,6 +345,13 @@ enum ssh_options_e {
   SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS,
   SSH_OPTIONS_HMAC_C_S,
   SSH_OPTIONS_HMAC_S_C,
+  SSH_OPTIONS_UTF8_TO_LOCAL,
+  SSH_OPTIONS_LOCAL_TO_UTF8,
+};
+
+enum ssh_charconvert_e {
+  SSH_CHARCONVERT_UTF8_TO_LOCAL,
+  SSH_CHARCONVERT_LOCAL_TO_UTF8,
 };
 
 enum {
@@ -488,6 +495,16 @@ LIBSSH_API int ssh_message_subtype(ssh_message msg);
 LIBSSH_API int ssh_message_type(ssh_message msg);
 LIBSSH_API int ssh_mkdir (const char *pathname, mode_t mode);
 LIBSSH_API ssh_session ssh_new(void);
+
+typedef char* (*ssh_string_charconvert_func)(char* input);
+/**
+ * @brief Converts a non-terminated string from one charset to another using the specified handle.
+ *
+ * @param handle Character conversion handle
+ * @param input  The string to convert
+ * @return The converted string
+ */
+LIBSSH_API int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, ssh_string_charconvert_func value);
 
 LIBSSH_API int ssh_options_copy(ssh_session src, ssh_session *dest);
 LIBSSH_API int ssh_options_getopt(ssh_session session, int *argcptr, char **argv);
@@ -649,6 +666,8 @@ LIBSSH_API char* ssh_string_for_log(const char* ascii);
 #else
 #define ssh_string_for_log(str) str
 #endif
+char* ssh_string_utf8_to_local(ssh_session session, char* utf8);
+char* ssh_string_local_to_utf8(ssh_session session, char* local);
 
 LIBSSH_API int ssh_getpass(const char *prompt, char *buf, size_t len, int echo,
     int verify);

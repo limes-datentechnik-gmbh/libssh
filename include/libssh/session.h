@@ -196,6 +196,8 @@ struct ssh_session_struct {
         char *gss_server_identity;
         char *gss_client_identity;
         int gss_delegate_creds;
+        ssh_string_charconvert_func utf_to_local_func;
+        ssh_string_charconvert_func local_to_utf_func;
     } opts;
     /* counters */
     ssh_counter socket_counter;

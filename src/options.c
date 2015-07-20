@@ -184,6 +184,35 @@ int ssh_options_set_algo(ssh_session session, int algo,
   return 0;
 }
 
+int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, ssh_string_charconvert_func value) {
+    if (session == NULL) {
+        return -1;
+    }
+
+    switch (type) {
+        case SSH_CHARCONVERT_UTF8_TO_LOCAL:
+            if (value == NULL) {
+                ssh_set_error_invalid(session);
+                return -1;
+            } else {
+                session->opts.utf_to_local_func = value;
+            }
+        case SSH_CHARCONVERT_LOCAL_TO_UTF8:
+            if (value == NULL) {
+                ssh_set_error_invalid(session);
+                return -1;
+            } else {
+                session->opts.local_to_utf_func = value;
+            }
+        default:
+            ssh_set_error(session, SSH_REQUEST_DENIED, "Unknown character converter option %d", type);
+            return -1;
+            break;
+    }
+
+    return 0;
+}
+
 /**
  * @brief This function can set all possible ssh options.
  *

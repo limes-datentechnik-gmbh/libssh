@@ -115,6 +115,9 @@ ssh_session ssh_new(void) {
       goto err;
     }
 
+    session->opts.utf_to_local_func = NULL;
+    session->opts.local_to_utf_func = NULL;
+
 #ifdef HAVE_ECC
     id = strdup("%d/id_ecdsa");
     if (id == NULL) {
