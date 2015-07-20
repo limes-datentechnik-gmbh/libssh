@@ -1025,7 +1025,7 @@ static sftp_attributes sftp_parse_attr_4(sftp_session sftp, ssh_buffer buf,
       if (owner == NULL) {
         break;
       }
-      attr->owner = ssh_string_to_char(owner);
+      attr->owner = ssh_string_utf8_to_local(sftp->session, ssh_string_to_char(owner));
       ssh_string_free(owner);
       if (attr->owner == NULL) {
         break;
@@ -1035,7 +1035,7 @@ static sftp_attributes sftp_parse_attr_4(sftp_session sftp, ssh_buffer buf,
       if (group == NULL) {
         break;
       }
-      attr->group = ssh_string_to_char(group);
+      attr->group = ssh_string_utf8_to_local(sftp->session, ssh_string_to_char(group));
       ssh_string_free(group);
       if (attr->group == NULL) {
         break;
@@ -1125,6 +1125,7 @@ static sftp_attributes sftp_parse_attr_4(sftp_session sftp, ssh_buffer buf,
       }
       attr->extended_count = ntohl(attr->extended_count);
 
+      // TODO: character convert extended attributes?
       while(attr->extended_count &&
           (attr->extended_type = buffer_get_ssh_string(buf)) &&
           (attr->extended_data = buffer_get_ssh_string(buf))){
@@ -1241,20 +1242,22 @@ static sftp_attributes sftp_parse_attr_3(sftp_session sftp, ssh_buffer buf,
         if (rc != SSH_OK){
             goto error;
         }
+        attr->name = ssh_string_utf8_to_local(sftp->session, attr->name);
         SSH_LOG(SSH_LOG_RARE, "Name: %s", ssh_string_for_log(attr->name));
 
         /* Set owner and group if we talk to openssh and have the longname */
         if (ssh_get_openssh_version(sftp->session)) {
-            attr->owner = sftp_parse_longname(attr->longname, SFTP_LONGNAME_OWNER);
+            attr->owner = ssh_string_utf8_to_local(sftp->session, sftp_parse_longname(attr->longname, SFTP_LONGNAME_OWNER));
             if (attr->owner == NULL) {
                 goto error;
             }
 
-            attr->group = sftp_parse_longname(attr->longname, SFTP_LONGNAME_GROUP);
+            attr->group = ssh_string_utf8_to_local(sftp->session, sftp_parse_longname(attr->longname, SFTP_LONGNAME_GROUP));
             if (attr->group == NULL) {
                 goto error;
             }
         }
+        attr->longname = ssh_string_utf8_to_local(sftp->session, attr->longname);
     }
 
     rc = ssh_buffer_unpack(buf, "d", &attr->flags);
@@ -1328,6 +1331,7 @@ static sftp_attributes sftp_parse_attr_3(sftp_session sftp, ssh_buffer buf,
         }
 
         if (attr->extended_count > 0){
+            // TODO: Character conversion on extended fields?
             rc = ssh_buffer_unpack(buf, "ss",
                     &attr->extended_type,
                     &attr->extended_data);
@@ -2687,7 +2691,7 @@ char *sftp_readlink(sftp_session sftp, const char *path) {
       /* TODO: what error to set here? */
       return NULL;
     }
-    lnk = ssh_string_to_char(link_s);
+    lnk = ssh_string_utf8_to_local(sftp->session, ssh_string_to_char(link_s));
     ssh_string_free(link_s);
 
     return lnk;
@@ -2995,7 +2999,7 @@ char *sftp_canonicalize_path(sftp_session sftp, const char *path) {
       /* TODO: error message? */
       return NULL;
     }
-    cname = ssh_string_to_char(name);
+    cname = ssh_string_utf8_to_local(sftp->session, ssh_string_to_char(name));
     ssh_string_free(name);
     if (cname == NULL) {
       ssh_set_error_oom(sftp->session);

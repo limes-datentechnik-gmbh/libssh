@@ -294,7 +294,6 @@ int ssh_service_request(ssh_session session, const char *service) {
       ssh_set_error_oom(session);
       return SSH_ERROR;
   }
-  ssh_print_hexa("ssh_service_request packet", (unsigned char*)session->out_buffer->data, session->out_buffer->used);
 
   session->auth_service_state=SSH_AUTH_SERVICE_SENT;
   if (packet_send(session) == SSH_ERROR) {
@@ -603,7 +602,7 @@ char *ssh_get_issue_banner(ssh_session session) {
     return NULL;
   }
 
-  return ssh_string_to_char(session->banner);
+  return ssh_string_utf8_to_local(session, ssh_string_to_char(session->banner));
 }
 
 /**

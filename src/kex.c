@@ -388,9 +388,9 @@ SSH_PACKET_CALLBACK(ssh_packet_kexinit){
             goto error;
         }
 
-        strings[i] = ssh_string_to_char(str);
+        strings[i] = ssh_string_utf8_to_local(session, ssh_string_to_char(str));
 #ifdef __EBCDIC__
-        ssh_string_to_ebcdic(strings[i], strings[i], strlen(strings[i]));
+        //ssh_string_to_ebcdic(strings[i], strings[i], strlen(strings[i]));
 #endif
         if (strings[i] == NULL) {
             ssh_set_error_oom(session);

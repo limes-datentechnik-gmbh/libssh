@@ -458,7 +458,7 @@ ssh_key ssh_agent_get_next_ident(struct ssh_session_struct *session,
             }
 
             if (comment) {
-                *comment = ssh_string_to_char(tmp);
+                *comment = ssh_string_utf8_to_local(session, ssh_string_to_char(tmp));
             } else {
                 ssh_string_free(blob);
                 ssh_string_free(tmp);
