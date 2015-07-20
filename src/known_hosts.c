@@ -465,11 +465,11 @@ int ssh_is_server_known(ssh_session session) {
     }
     if (match) {
       /* We got a match. Now check the key type */
-      if (strcmp(session->current_crypto->server_pubkey_type, type) != 0) {
+      if (strcmp(ssh_string_for_log(session->current_crypto->server_pubkey_type), type) != 0) {
           SSH_LOG(SSH_LOG_PACKET,
                   "ssh_is_server_known: server type [%s] doesn't match the "
                   "type [%s] in known_hosts file",
-                  session->current_crypto->server_pubkey_type,
+                  ssh_string_for_log(session->current_crypto->server_pubkey_type),
                   type);
         /* Different type. We don't override the known_changed error which is
          * more important */
@@ -532,6 +532,9 @@ int ssh_write_knownhost(ssh_session session) {
     char *dir;
     char *host;
     char *hostport;
+#ifdef __EBCDIC__
+    char *str;
+#endif
     int rc;
 
     if (session->opts.host == NULL) {
@@ -627,11 +630,29 @@ int ssh_write_knownhost(ssh_session session) {
             return -1;
         }
 
+#ifdef __EBCDIC__
+        str = strdup(key->type_c);
+        if (str == NULL) {
+            ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
+            ssh_key_free(key);
+            SAFE_FREE(host);
+            SAFE_FREE(b64_key);
+            return -1;
+        }
+        ssh_string_to_ebcdic(str, str, strlen(str));
+        snprintf(buffer, sizeof(buffer),
+                "%s %s %s\n",
+                host,
+                str,
+                b64_key);
+        free(str);
+#else
         snprintf(buffer, sizeof(buffer),
                 "%s %s %s\n",
                 host,
                 key->type_c,
                 b64_key);
+#endif
 
         ssh_key_free(key);
         SAFE_FREE(host);
