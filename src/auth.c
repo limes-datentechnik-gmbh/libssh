@@ -363,6 +363,8 @@ int ssh_userauth_list(ssh_session session, const char *username)
  */
 int ssh_userauth_none(ssh_session session, const char *username) {
     int rc;
+    char* usernameCpy;
+    char* usernameConv;
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
@@ -372,9 +374,25 @@ int ssh_userauth_none(ssh_session session, const char *username) {
 #pragma convert(pop)
 #endif
 
+  usernameCpy = strdup(username ? username : session->opts.username);
+  if (usernameCpy == NULL) {
+      ssh_set_error_oom(session);
+      return SSH_AUTH_ERROR;
+  }
+  usernameConv = ssh_string_local_to_utf8(session, usernameCpy);
+  if (usernameConv != usernameCpy) {
+    SAFE_FREE(usernameCpy);
+    if (usernameConv == NULL) {
+      ssh_set_error_oom(session);
+      return SSH_AUTH_ERROR;
+    }
+  }
+
 #ifdef WITH_SSH1
     if (session->version == 1) {
-        return ssh_userauth1_none(session, username);
+        int rc = ssh_userauth1_none(session, usernameConv);
+        SAFE_FREE(usernameConv);
+        return rc;
     }
 #endif
 
@@ -384,6 +402,7 @@ int ssh_userauth_none(ssh_session session, const char *username) {
         case SSH_PENDING_CALL_AUTH_NONE:
             goto pending;
         default:
+            SAFE_FREE(usernameConv);
             ssh_set_error(session, SSH_FATAL,
                           "Wrong state during pending SSH call");
             return SSH_AUTH_ERROR;
@@ -391,15 +410,17 @@ int ssh_userauth_none(ssh_session session, const char *username) {
 
     rc = ssh_userauth_request_service(session);
     if (rc == SSH_AGAIN) {
+        SAFE_FREE(usernameConv);
         return SSH_AUTH_AGAIN;
     } else if (rc == SSH_ERROR) {
+        SAFE_FREE(usernameConv);
         return SSH_AUTH_ERROR;
     }
 
     /* request */
     rc = ssh_buffer_pack(session->out_buffer, "bsss",
             SSH2_MSG_USERAUTH_REQUEST,
-            username ? username : session->opts.username,
+            usernameConv,
             str_ssh_connection,
             str_none
             );
@@ -411,6 +432,7 @@ int ssh_userauth_none(ssh_session session, const char *username) {
     session->pending_call_state = SSH_PENDING_CALL_AUTH_NONE;
     rc = packet_send(session);
     if (rc == SSH_ERROR) {
+        SAFE_FREE(usernameConv);
         return SSH_AUTH_ERROR;
     }
 
@@ -420,11 +442,13 @@ pending:
         session->pending_call_state = SSH_PENDING_CALL_NONE;
     }
 
+    SAFE_FREE(usernameConv);
     return rc;
 fail:
     ssh_set_error_oom(session);
     ssh_buffer_reinit(session->out_buffer);
 
+    SAFE_FREE(usernameConv);
     return SSH_AUTH_ERROR;
 }
 
@@ -462,6 +486,8 @@ int ssh_userauth_try_publickey(ssh_session session,
 {
     ssh_string pubkey_s = NULL;
     int rc;
+    char* usernameCpy;
+    char* usernameConv;
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
@@ -511,16 +537,31 @@ int ssh_userauth_try_publickey(ssh_session session,
         goto fail;
     }
 
+    usernameCpy = strdup(username ? username : session->opts.username);
+    if (usernameCpy == NULL) {
+        ssh_set_error_oom(session);
+        return SSH_AUTH_ERROR;
+    }
+    usernameConv = ssh_string_local_to_utf8(session, usernameCpy);
+    if (usernameConv != usernameCpy) {
+        SAFE_FREE(usernameCpy);
+        if (usernameConv == NULL) {
+            ssh_set_error_oom(session);
+            return SSH_AUTH_ERROR;
+        }
+    }
+
     /* request */
     rc = ssh_buffer_pack(session->out_buffer, "bsssbsS",
             SSH2_MSG_USERAUTH_REQUEST,
-            username ? username : session->opts.username,
+            usernameConv,
             str_ssh_connection,
             str_publickey,
             0, /* private key ? */
             pubkey->type_c, /* algo */
             pubkey_s /* public key */
             );
+    SAFE_FREE(usernameConv);
     if (rc < 0) {
         goto fail;
     }
@@ -579,6 +620,8 @@ int ssh_userauth_publickey(ssh_session session,
 {
     ssh_string str = NULL;
     int rc;
+    char* usernameCpy;
+    char* usernameConv;
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
@@ -628,16 +671,31 @@ int ssh_userauth_publickey(ssh_session session,
         goto fail;
     }
 
+    usernameCpy = strdup(username ? username : session->opts.username);
+    if (usernameCpy == NULL) {
+        ssh_set_error_oom(session);
+        return SSH_AUTH_ERROR;
+    }
+    usernameConv = ssh_string_local_to_utf8(session, usernameCpy);
+    if (usernameConv != usernameCpy) {
+        SAFE_FREE(usernameCpy);
+        if (usernameConv == NULL) {
+            ssh_set_error_oom(session);
+            return SSH_AUTH_ERROR;
+        }
+    }
+
     /* request */
     rc = ssh_buffer_pack(session->out_buffer, "bsssbsS",
             SSH2_MSG_USERAUTH_REQUEST,
-            username ? username : session->opts.username,
+            usernameConv,
             str_ssh_connection,
             str_publickey,
             1, /* private key */
             privkey->type_c, /* algo */
             str /* public key */
             );
+    SAFE_FREE(usernameConv);
     if (rc < 0) {
         goto fail;
     }
@@ -685,6 +743,8 @@ static int ssh_userauth_agent_publickey(ssh_session session,
 {
     ssh_string str = NULL;
     int rc;
+    char* usernameCpy;
+    char* usernameConv;
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
@@ -720,16 +780,31 @@ static int ssh_userauth_agent_publickey(ssh_session session,
         goto fail;
     }
 
+    usernameCpy = strdup(username ? username : session->opts.username);
+    if (usernameCpy == NULL) {
+        ssh_set_error_oom(session);
+        return SSH_AUTH_ERROR;
+    }
+    usernameConv = ssh_string_local_to_utf8(session, usernameCpy);
+    if (usernameConv != usernameCpy) {
+        SAFE_FREE(usernameCpy);
+        if (usernameConv == NULL) {
+            ssh_set_error_oom(session);
+            return SSH_AUTH_ERROR;
+        }
+    }
+
     /* request */
     rc = ssh_buffer_pack(session->out_buffer, "bsssbsS",
             SSH2_MSG_USERAUTH_REQUEST,
-            username ? username : session->opts.username,
+            usernameConv,
             str_ssh_connection,
             str_publickey,
             1, /* private key */
             pubkey->type_c, /* algo */
             str /* public key */
             );
+    SAFE_FREE(usernameConv);
     if (rc < 0) {
         goto fail;
     }
@@ -1147,6 +1222,10 @@ int ssh_userauth_password(ssh_session session,
                           const char *username,
                           const char *password) {
     int rc;
+    char* passwordCpy;
+    char* passwordConv;
+    char* usernameCpy;
+    char* usernameConv;
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
@@ -1156,9 +1235,41 @@ int ssh_userauth_password(ssh_session session,
 #pragma convert(pop)
 #endif
 
+    passwordCpy = strdup(password);
+    if (passwordCpy == NULL) {
+        ssh_set_error_oom(session);
+        return SSH_ERROR;
+    }
+    passwordConv = ssh_string_local_to_utf8(session, passwordCpy);
+    if (passwordConv != passwordCpy) {
+        SAFE_FREE(passwordCpy);
+        if (passwordConv == NULL) {
+            ssh_set_error_oom(session);
+            return SSH_ERROR;
+        }
+    }
+
+    usernameCpy = strdup(username ? username : session->opts.username);
+    if (usernameCpy == NULL) {
+        SAFE_FREE(passwordConv);
+        ssh_set_error_oom(session);
+        return SSH_AUTH_ERROR;
+    }
+    usernameConv = ssh_string_local_to_utf8(session, usernameCpy);
+    if (usernameConv != usernameCpy) {
+        SAFE_FREE(usernameCpy);
+        if (usernameConv == NULL) {
+            SAFE_FREE(passwordConv);
+            ssh_set_error_oom(session);
+            return SSH_AUTH_ERROR;
+        }
+    }
+
 #ifdef WITH_SSH1
     if (session->version == 1) {
-        rc = ssh_userauth1_password(session, username, password);
+        rc = ssh_userauth1_password(session, usernameConv, passwordConv);
+        SAFE_FREE(passwordConv);
+        SAFE_FREE(usernameConv);
         return rc;
     }
 #endif
@@ -1169,6 +1280,8 @@ int ssh_userauth_password(ssh_session session,
         case SSH_PENDING_CALL_AUTH_OFFER_PUBKEY:
             goto pending;
         default:
+            SAFE_FREE(passwordConv);
+            SAFE_FREE(usernameConv);
             ssh_set_error(session,
                           SSH_FATAL,
                           "Wrong state during pending SSH call");
@@ -1177,19 +1290,23 @@ int ssh_userauth_password(ssh_session session,
 
     rc = ssh_userauth_request_service(session);
     if (rc == SSH_AGAIN) {
+        SAFE_FREE(passwordConv);
+        SAFE_FREE(usernameConv);
         return SSH_AUTH_AGAIN;
     } else if (rc == SSH_ERROR) {
+        SAFE_FREE(passwordConv);
+        SAFE_FREE(usernameConv);
         return SSH_AUTH_ERROR;
     }
 
     /* request */
     rc = ssh_buffer_pack(session->out_buffer, "bsssbs",
             SSH2_MSG_USERAUTH_REQUEST,
-            username ? username : session->opts.username,
+            usernameConv,
             str_ssh_connection,
             str_password,
             0, /* false */
-            password
+            passwordConv
     );
     if (rc < 0) {
         goto fail;
@@ -1199,6 +1316,8 @@ int ssh_userauth_password(ssh_session session,
     session->pending_call_state = SSH_PENDING_CALL_AUTH_OFFER_PUBKEY;
     rc = packet_send(session);
     if (rc == SSH_ERROR) {
+        SAFE_FREE(passwordConv);
+        SAFE_FREE(usernameConv);
         return SSH_AUTH_ERROR;
     }
 
@@ -1208,11 +1327,15 @@ pending:
         session->pending_call_state = SSH_PENDING_CALL_NONE;
     }
 
+    SAFE_FREE(passwordConv);
+    SAFE_FREE(usernameConv);
     return rc;
 fail:
     ssh_set_error_oom(session);
     ssh_buffer_reinit(session->out_buffer);
 
+    SAFE_FREE(passwordConv);
+    SAFE_FREE(usernameConv);
     return SSH_AUTH_ERROR;
 }
 
@@ -1333,6 +1456,8 @@ static int ssh_userauth_kbdint_init(ssh_session session,
                                     const char *submethods)
 {
     int rc;
+    char* usernameCpy;
+    char* usernameConv;
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
@@ -1355,15 +1480,30 @@ static int ssh_userauth_kbdint_init(ssh_session session,
         return SSH_AUTH_ERROR;
     }
 
+    usernameCpy = strdup(username ? username : session->opts.username);
+    if (usernameCpy == NULL) {
+        ssh_set_error_oom(session);
+        return SSH_AUTH_ERROR;
+    }
+    usernameConv = ssh_string_local_to_utf8(session, usernameCpy);
+    if (usernameConv != usernameCpy) {
+        SAFE_FREE(usernameCpy);
+        if (usernameConv == NULL) {
+            ssh_set_error_oom(session);
+            return SSH_AUTH_ERROR;
+        }
+    }
+
     /* request */
     rc = ssh_buffer_pack(session->out_buffer, "bsssss",
             SSH2_MSG_USERAUTH_REQUEST,
-            username ? username : session->opts.username,
+            usernameConv,
             str_ssh_connection,
             str_keyboard_interactive,
             "", /* lang (ignore it) */
             submethods ? submethods : ""
     );
+    SAFE_FREE(usernameConv);
     if (rc < 0) {
         goto fail;
     }

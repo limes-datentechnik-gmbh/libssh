@@ -313,10 +313,20 @@ const char* ssh_get_clientbanner(ssh_session session) {
  * @return Returns the server banner string or NULL.
  */
 const char* ssh_get_serverbanner(ssh_session session) {
-	if(!session) {
-		return NULL;
-	}
-	return session->serverbanner;
+    char* res;
+    static char banner_local[2048] = "";
+    if(!session) {
+        return NULL;
+    }
+    // char conversion
+    res = ssh_string_utf8_to_local(session, session->serverbanner);
+    if (res==NULL)
+        return session->serverbanner;
+    // copy to static buffer and free malloc'd memory
+    strncpy(banner_local, res, sizeof(banner_local));
+    banner_local[sizeof(banner_local)-1] = '\0';
+    free(res);
+    return banner_local;
 }
 
 /**
