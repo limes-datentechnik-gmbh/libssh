@@ -442,15 +442,9 @@ char* ssh_string_for_log(const char* ascii) {
 
 char* ssh_string_utf8_to_local(ssh_session session, char* utf8) {
     if (session == NULL || utf8 == NULL) {
-        if (session == NULL)
-            fprintf(stderr, "session==NULL\n");
-        else
-            fprintf(stderr, "utf==NULL\n");
-
         return NULL;
     }
     if (session->opts.utf_to_local_func == NULL) {
-        fprintf(stderr, "No UTF8->local function set\n");
 #ifdef __EBCDIC__
         // if EBCDIC, let's do at least basic ASCII->EBCDIC conversion
         ssh_string_to_ebcdic(utf8, utf8, strlen(utf8));
@@ -458,9 +452,7 @@ char* ssh_string_utf8_to_local(ssh_session session, char* utf8) {
         return utf8; // no conversion function set = no conversion
     }
 
-    fprintf(stderr, "Doing UTF8->local... UTF-8: %s", utf8);
     char* r  = session->opts.utf_to_local_func(utf8);
-    fprintf(stderr, " local: %s\n", r);
     return r;
 }
 
