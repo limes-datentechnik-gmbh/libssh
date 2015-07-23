@@ -889,6 +889,8 @@ int ssh_userauth_agent(ssh_session session,
     }
 
     if (!agent_is_running(session)) {
+        SSH_LOG(SSH_LOG_DEBUG,
+                "Agent is not running");
         return SSH_AUTH_DENIED;
     }
     if (!session->agent_state){
@@ -1032,6 +1034,8 @@ int ssh_userauth_publickey_auto(ssh_session session,
     if (state->state == SSH_AUTH_AUTO_STATE_NONE) {
 #ifndef _WIN32
         /* Try authentication with ssh-agent first */
+        SSH_LOG(SSH_LOG_DEBUG,
+                "Trying to authenticate with ssh-agent");
         rc = ssh_userauth_agent(session, username);
         if (rc == SSH_AUTH_SUCCESS || rc == SSH_AUTH_AGAIN) {
             return rc;
