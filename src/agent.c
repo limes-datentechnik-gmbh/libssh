@@ -330,8 +330,8 @@ static int agent_talk(struct ssh_session_struct *session,
 int ssh_agent_get_ident_count(struct ssh_session_struct *session) {
   ssh_buffer request = NULL;
   ssh_buffer reply = NULL;
-  unsigned int type = 0;
-  unsigned int c1 = 0, c2 = 0;
+  uint8_t type = 0;
+  uint8_t c1 = 0, c2 = 0;
   uint8_t buf[4] = {0};
   int rc;
 
@@ -507,7 +507,7 @@ ssh_string ssh_agent_sign_data(ssh_session session,
     ssh_buffer reply;
     ssh_string key_blob;
     ssh_string sig_blob;
-    int type = SSH2_AGENT_FAILURE;
+    uint8_t type = SSH2_AGENT_FAILURE;
     int flags = 0;
     uint32_t dlen;
     int rc;
@@ -568,7 +568,7 @@ ssh_string ssh_agent_sign_data(ssh_session session,
     ssh_buffer_free(request);
 
     /* check if reply is valid */
-    if (buffer_get_u8(reply, (uint8_t *) &type) != sizeof(uint8_t)) {
+    if (buffer_get_u8(reply, &type) != sizeof(uint8_t)) {
         ssh_buffer_free(reply);
         return NULL;
     }
