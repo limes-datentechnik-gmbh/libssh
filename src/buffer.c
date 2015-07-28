@@ -1055,11 +1055,11 @@ int _ssh_buffer_unpack(struct ssh_buffer_struct *buffer,
 /**
  * @brief Writes a hex dump of the buffer's content to stderr
  */
-int ssh_buffer_dump(struct ssh_buffer_struct *buffer)
+void ssh_buffer_dump(struct ssh_buffer_struct *buffer)
 {
     static const char alphabet[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
     char output[buffer->used*3];
-    int i;
+    unsigned int i;
 
     for (i=0; i<buffer->used; i++) {
       output[i*3]=  alphabet[((buffer->data[i])>>4)&0xF];

@@ -96,6 +96,6 @@ ssh_string buffer_get_mpint(ssh_buffer buffer);
 /* buffer_pass_bytes acts as if len bytes have been read (used for padding) */
 uint32_t buffer_pass_bytes_end(ssh_buffer buffer, uint32_t len);
 uint32_t buffer_pass_bytes(ssh_buffer buffer, uint32_t len);
-int ssh_buffer_dump(struct ssh_buffer_struct *buffer);
+void ssh_buffer_dump(struct ssh_buffer_struct *buffer);
 
 #endif /* BUFFER_H_ */
