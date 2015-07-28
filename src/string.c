@@ -452,8 +452,7 @@ char* ssh_string_utf8_to_local(ssh_session session, char* utf8) {
         return utf8; // no conversion function set = no conversion
     }
 
-    char* r  = session->opts.utf_to_local_func(utf8);
-    return r;
+    return session->opts.utf_to_local_func(utf8);
 }
 
 char* ssh_string_local_to_utf8(ssh_session session, char* local) {
