@@ -325,7 +325,8 @@ const char* ssh_get_serverbanner(ssh_session session) {
     // copy to static buffer and free malloc'd memory
     strncpy(banner_local, res, sizeof(banner_local));
     banner_local[sizeof(banner_local)-1] = '\0';
-    free(res);
+    if (res != session->serverbanner)
+        free(res);
     return banner_local;
 }
 
