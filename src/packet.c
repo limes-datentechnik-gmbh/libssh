@@ -127,6 +127,51 @@ static ssh_packet_callback default_packet_handlers[]= {
   ssh_packet_channel_failure,              // SSH2_MSG_CHANNEL_FAILURE            100
 };
 
+#ifdef DEBUG_PACKETS
+static const char* ssh_packet_type_str(uint32_t type) {
+   switch (type) {
+      case SSH2_MSG_DISCONNECT:                        return "DISCONNECT";
+      case SSH2_MSG_IGNORE:                            return "IGNORE";
+      case SSH2_MSG_UNIMPLEMENTED:                     return "UNIMPLEMENTED";
+      case SSH2_MSG_DEBUG:                             return "DEBUG";
+      case SSH2_MSG_SERVICE_REQUEST:                   return "SERVICE_REQUEST";
+      case SSH2_MSG_SERVICE_ACCEPT:                    return "SERVICE_ACCEPT";
+      case SSH2_MSG_KEXINIT:                           return "KEXINIT";
+      case SSH2_MSG_NEWKEYS:                           return "NEWKEYS";
+      case SSH2_MSG_KEXDH_INIT:                        return "KEXDH_INIT / KEX_ECDH_INIT / ECMQV_INIT / KEX_DH_GEX_REQUEST_OLD";
+      case SSH2_MSG_KEXDH_REPLY:                       return "KEXDH_REPLY / KEX_ECDH_REPLY / ECMQV_REPLY / KEX_DH_GEX_GROUP";
+      case SSH2_MSG_KEX_DH_GEX_INIT:                   return "KEX_DH_GEX_INIT";
+      case SSH2_MSG_KEX_DH_GEX_REPLY:                  return "KEX_DH_GEX_REPLY";
+      case SSH2_MSG_KEX_DH_GEX_REQUEST:                return "KEX_DH_GEX_REQUEST";
+      case SSH2_MSG_USERAUTH_REQUEST:                  return "USERAUTH_REQUEST";
+      case SSH2_MSG_USERAUTH_FAILURE:                  return "USERAUTH_FAILURE";
+      case SSH2_MSG_USERAUTH_SUCCESS:                  return "USERAUTH_SUCCESS";
+      case SSH2_MSG_USERAUTH_BANNER:                   return "USERAUTH_BANNER";
+      case SSH2_MSG_USERAUTH_PK_OK:                    return "USERAUTH_PK_OK / USERAUTH_PASSWD_CHANGEREQ / INFO_REQUEST / GSSAPI_RESPONSE";
+      case SSH2_MSG_USERAUTH_INFO_RESPONSE:            return "USERAUTH_INFO_RESPONSE / USERAUTH_GSSAPI_TOKEN";
+      case SSH2_MSG_USERAUTH_GSSAPI_EXCHANGE_COMPLETE: return "USERAUTH_GSSAPI_EXCHANGE_COMPLETE";
+      case SSH2_MSG_USERAUTH_GSSAPI_ERROR:             return "USERAUTH_GSSAPI_ERROR";
+      case SSH2_MSG_USERAUTH_GSSAPI_ERRTOK:            return "USERAUTH_GSSAPI_ERRTOK";
+      case SSH2_MSG_USERAUTH_GSSAPI_MIC:               return "USERAUTH_GSSAPI_MIC";
+      case SSH2_MSG_GLOBAL_REQUEST:                    return "GLOBAL_REQUEST";
+      case SSH2_MSG_REQUEST_SUCCESS:                   return "REQUEST_SUCCESS";
+      case SSH2_MSG_REQUEST_FAILURE:                   return "REQUEST_FAILURE";
+      case SSH2_MSG_CHANNEL_OPEN:                      return "CHANNEL_OPEN";
+      case SSH2_MSG_CHANNEL_OPEN_CONFIRMATION:         return "CHANNEL_OPEN_CONFIRMATION";
+      case SSH2_MSG_CHANNEL_OPEN_FAILURE:              return "CHANNEL_OPEN_FAILURE";
+      case SSH2_MSG_CHANNEL_WINDOW_ADJUST:             return "CHANNEL_WINDOW_ADJUST";
+      case SSH2_MSG_CHANNEL_DATA:                      return "CHANNEL_DATA";
+      case SSH2_MSG_CHANNEL_EXTENDED_DATA:             return "CHANNEL_EXTENDED_DATA";
+      case SSH2_MSG_CHANNEL_EOF:                       return "CHANNEL_EOF";
+      case SSH2_MSG_CHANNEL_CLOSE:                     return "CHANNEL_CLOSE";
+      case SSH2_MSG_CHANNEL_REQUEST:                   return "CHANNEL_REQUEST";
+      case SSH2_MSG_CHANNEL_SUCCESS:                   return "CHANNEL_SUCCESS";
+      case SSH2_MSG_CHANNEL_FAILURE:                   return "CHANNEL_FAILURE";
+      default:                                         return "UNKNOWN";
+   }
+}
+#endif
+
 /* in nonblocking mode, socket_read will read as much as it can, and return */
 /* SSH_OK if it has read at least len bytes, otherwise, SSH_AGAIN. */
 /* in blocking mode, it will read at least len bytes and will block until it's ok. */
@@ -153,6 +198,9 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
     uint32_t len, compsize, payloadsize;
     uint8_t padding;
     size_t processed = 0; /* number of byte processed from the callback */
+#ifdef DEBUG_PACKETS
+    char* hexa;
+#endif
 
     if(session->current_crypto != NULL) {
       current_macsize = hmac_digest_len(session->current_crypto->in_hmac);
@@ -327,6 +375,12 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
             SSH_LOG(SSH_LOG_PACKET,
                     "packet: read type %hhd [len=%d,padding=%hhd,comp=%d,payload=%d]",
                     session->in_packet.type, len, padding, compsize, payloadsize);
+
+#ifdef DEBUG_PACKETS
+            hexa = ssh_get_hexa(buffer_get_rest(session->in_buffer), len>32?32:len);
+            fprintf(stderr,"Recv buffer (max 32 bytes): %s (%s)\n", hexa, ssh_packet_type_str(session->in_packet.type));
+            ssh_string_free_char(hexa);
+#endif
 
             /* Execute callbacks */
             ssh_packet_process(session, session->in_packet.type);
@@ -526,6 +580,14 @@ static int packet_send2(ssh_session session) {
   uint8_t padding;
 
   uint8_t header[sizeof(padding) + sizeof(finallen)] = { 0 };
+
+#ifdef DEBUG_PACKETS
+  uint8_t packettype = ((uint8_t*)buffer_get_rest(session->out_buffer))[0];
+  uint32_t dumplen = currentlen>32?32:currentlen;
+  char* hexa = ssh_get_hexa(buffer_get_rest(session->out_buffer), dumplen);
+  fprintf(stderr,"Send buffer (max 32 bytes): %s (%s)\n", hexa, ssh_packet_type_str(packettype));
+  ssh_string_free_char(hexa);
+#endif
 
   payloadsize = currentlen;
 #ifdef WITH_ZLIB

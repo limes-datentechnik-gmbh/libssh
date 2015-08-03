@@ -474,6 +474,10 @@ SSH_PACKET_CALLBACK(channel_rcv_data){
   size_t len;
   int is_stderr;
   int rest;
+#ifdef DEBUG_PACKETS
+  uint32_t dumplen;
+  char* hexa;
+#endif
   (void)user;
 
   if(type==SSH2_MSG_CHANNEL_DATA)
@@ -502,6 +506,13 @@ SSH_PACKET_CALLBACK(channel_rcv_data){
     return SSH_PACKET_USED;
   }
   len = ssh_string_len(str);
+
+#ifdef DEBUG_PACKETS
+  dumplen = len>32?32:len;
+  hexa = ssh_get_hexa(ssh_string_data(str), dumplen);
+  fprintf(stderr,"Channel data payload (max 32 bytes): %s (len: %lu)\n", hexa, (unsigned long)len);
+  ssh_string_free_char(hexa);
+#endif
 
   SSH_LOG(SSH_LOG_PACKET,
       "Channel receiving %" PRIdS " bytes data in %d (local win=%d remote win=%d)",
@@ -2815,6 +2826,9 @@ int ssh_channel_read_timeout(ssh_channel channel,
   /* Read count bytes if len is greater, everything otherwise */
   len = (len > count ? count : len);
   memcpy(dest, buffer_get_rest(stdbuf), len);
+#ifdef DEBUG_PACKETS
+  fprintf(stderr, "channel_read: len=%d count=%d\n", len, count);
+#endif
   buffer_pass_bytes(stdbuf,len);
   if (channel->counter != NULL) {
       channel->counter->in_bytes += len;

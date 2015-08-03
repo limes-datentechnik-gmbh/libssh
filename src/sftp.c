@@ -385,6 +385,9 @@ sftp_packet sftp_packet_read(sftp_session sftp) {
   while (size > 0 && size < UINT_MAX) {
     r=ssh_channel_read(sftp->channel,buffer,
         sizeof(buffer)>size ? size:sizeof(buffer),0);
+#ifdef DEBUG_PACKETS
+    fprintf(stderr, "sftp_packet_read: read: %d\n", r);
+#endif
 
     if(r <= 0) {
       /* TODO: check if there are cases where an error needs to be set here */
