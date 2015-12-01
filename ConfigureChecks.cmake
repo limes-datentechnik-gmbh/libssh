@@ -1,4 +1,7 @@
+include(CheckIncludeFile)
+if (WIN32)
 include(CheckIncludeFiles)
+endif (WIN32)
 include(CheckSymbolExists)
 include(CheckFunctionExists)
 include(CheckLibraryExists)
