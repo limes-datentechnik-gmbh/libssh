@@ -533,6 +533,30 @@ LIBSSH_API int sftp_async_read_begin(sftp_file file, uint32_t len);
 LIBSSH_API int sftp_async_read(sftp_file file, void *data, uint32_t len, uint32_t id);
 
 /**
+ * @brief Wait for an asynchronous read to complete and discard the data.
+ *
+ * Asynchronous read requests made through sftp_async_read_begin() cannot be
+ * cancelled. If the requested data is no longer needed (e.g. because
+ * you need to sftp_seek() somewhere else) this function can be used to
+ * receive and ignore the requested data.
+ *
+ * @param file          The opened sftp file handle to be read from.
+ *
+ * @param id            The identifier returned by the sftp_async_read_begin()
+ *                      function.
+ *
+ * @return              SSH_OK on success, SSH_ERROR if an error occured,
+ *                      SSH_AGAIN if the file is opened in nonblocking mode and
+ *                      the request hasn't been executed yet.
+ *
+ * @warning             A call to this function with an invalid identifier
+ *                      will never return.
+ *
+ * @see sftp_async_read_begin()
+ */
+LIBSSH_API int sftp_async_discard(sftp_file file, uint32_t id);
+
+/**
  * @brief Write to a file using an opened sftp file handle.
  *
  * @param file          Open sftp file handle to write to.

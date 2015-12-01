@@ -2020,6 +2020,69 @@ int sftp_async_read(sftp_file file, void *data, uint32_t size, uint32_t id){
   return SSH_ERROR;
 }
 
+// TODO: file->offset updaten
+int sftp_async_discard(sftp_file file, uint32_t id) {
+  sftp_session sftp;
+  sftp_message msg = NULL;
+  sftp_status_message status;
+  int err = SSH_OK;
+  uint32_t len;
+
+  if (file == NULL) {
+    return SSH_ERROR;
+  }
+  sftp = file->sftp;
+
+  if (file->eof) {
+    return 0;
+  }
+
+  /* handle an existing request */
+  while (msg == NULL) {
+    if (file->nonblocking){
+      if (ssh_channel_poll(sftp->channel, 0) == 0) {
+        /* we cannot block */
+        return SSH_AGAIN;
+      }
+    }
+
+    if (sftp_read_and_dispatch(sftp) < 0) {
+      /* something nasty has happened */
+      return SSH_ERROR;
+    }
+
+    msg = sftp_dequeue(sftp,id);
+  }
+
+  switch (msg->packet_type) {
+    case SSH_FXP_STATUS:
+      status = parse_status_msg(msg);
+      sftp_message_free(msg);
+      if (status == NULL) {
+        return SSH_ERROR;
+      }
+      sftp_set_error(sftp, status->status);
+      if (status->status != SSH_FX_EOF) {
+        ssh_set_error(sftp->session, SSH_REQUEST_DENIED,
+            "SFTP server : %s", status->errormsg);
+        err = SSH_ERROR;
+      } else {
+        file->eof = 1;
+      }
+      status_msg_free(status);
+      return err;
+    case SSH_FXP_DATA:
+      sftp_message_free(msg);
+      return SSH_OK;
+    default:
+      ssh_set_error(sftp->session,SSH_FATAL,"Received message %d during read!",msg->packet_type);
+      sftp_message_free(msg);
+      return SSH_ERROR;
+  }
+
+  return SSH_ERROR;
+}
+
 ssize_t sftp_write(sftp_file file, const void *buf, size_t count) {
   sftp_session sftp = file->sftp;
   sftp_message msg = NULL;
