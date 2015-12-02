@@ -457,6 +457,14 @@ static void ssh_server_connection_callback(ssh_session session){
 			}
 			memcpy(session->next_crypto->session_id, session->current_crypto->session_id,
 			    session->current_crypto->digest_len);
+		    if (session->current_crypto->in_cipher->set_decrypt_key(session->current_crypto->in_cipher, session->current_crypto->decryptkey,
+		        session->current_crypto->decryptIV) < 0) {
+		      goto error;
+		    }
+		    if (session->current_crypto->out_cipher->set_encrypt_key(session->current_crypto->out_cipher, session->current_crypto->encryptkey,
+		        session->current_crypto->encryptIV) < 0) {
+		      goto error;
+		    }
 
 			    set_status(session,1.0f);
 			    session->connected = 1;
@@ -746,7 +754,7 @@ int ssh_message_global_request_reply_success(ssh_message msg, uint16_t bound_por
         if(msg->global_request.type == SSH_GLOBAL_REQUEST_TCPIP_FORWARD 
                                 && msg->global_request.bind_port == 0) {
             rc = ssh_buffer_pack(msg->session->out_buffer, "d", bound_port);
-            if (rc != SSH_ERROR) {
+            if (rc != SSH_OK) {
                 ssh_set_error_oom(msg->session);
                 goto error;
             }

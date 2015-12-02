@@ -59,6 +59,7 @@ check_include_file(libutil.h HAVE_LIBUTIL_H)
 check_include_file(sys/time.h HAVE_SYS_TIME_H)
 check_include_file(sys/param.h HAVE_SYS_PARAM_H)
 check_include_file(arpa/inet.h HAVE_ARPA_INET_H)
+check_include_file(byteswap.h HAVE_BYTESWAP_H)
 
 if (WIN32)
   check_include_files("winsock2.h;ws2tcpip.h;wspiapi.h" HAVE_WSPIAPI_H)
@@ -92,6 +93,15 @@ if (OPENSSL_FOUND)
 
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
     check_include_file(openssl/ecdsa.h HAVE_OPENSSL_ECDSA_H)
+
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    set(CMAKE_REQUIRED_LIBRARIES ${OPENSSL_CRYPTO_LIBRARY})
+    check_function_exists(EVP_aes_128_ctr HAVE_OPENSSL_EVP_AES_CTR)
+
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    set(CMAKE_REQUIRED_LIBRARIES ${OPENSSL_CRYPTO_LIBRARY})
+    check_function_exists(EVP_aes_128_cbc HAVE_OPENSSL_EVP_AES_CBC)
+
 endif()
 
 if (CMAKE_HAVE_PTHREAD_H)

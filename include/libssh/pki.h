@@ -60,6 +60,7 @@ struct ssh_key_struct {
     ed25519_pubkey *ed25519_pubkey;
     ed25519_privkey *ed25519_privkey;
     void *cert;
+    enum ssh_keytypes_e cert_type;
 };
 
 struct ssh_signature_struct {
@@ -111,6 +112,10 @@ int ssh_pki_export_pubkey_rsa1(const ssh_key key,
                                const char *host,
                                char *rsa1,
                                size_t rsa1_len);
+
+int ssh_pki_import_cert_blob(const ssh_string cert_blob,
+                             ssh_key *pkey);
+
 
 /* SSH Signing Functions */
 ssh_string ssh_pki_do_sign(ssh_session session, ssh_buffer sigbuf,

@@ -58,6 +58,7 @@
 #else /* _MSC_VER */
   #include <unistd.h>
   #include <inttypes.h>
+  #include <sys/types.h>
 #endif /* _MSC_VER */
 
 #ifdef _WIN32
@@ -188,7 +189,8 @@ enum ssh_channel_type_e {
 	SSH_CHANNEL_SESSION,
 	SSH_CHANNEL_DIRECT_TCPIP,
 	SSH_CHANNEL_FORWARDED_TCPIP,
-	SSH_CHANNEL_X11
+	SSH_CHANNEL_X11,
+	SSH_CHANNEL_AUTH_AGENT
 };
 
 enum ssh_channel_requests_e {
@@ -253,7 +255,9 @@ enum ssh_keytypes_e{
   SSH_KEYTYPE_RSA,
   SSH_KEYTYPE_RSA1,
   SSH_KEYTYPE_ECDSA,
-  SSH_KEYTYPE_ED25519
+  SSH_KEYTYPE_ED25519,
+  SSH_KEYTYPE_DSS_CERT01,
+  SSH_KEYTYPE_RSA_CERT01
 };
 
 enum ssh_keycmp_e {
@@ -408,6 +412,7 @@ LIBSSH_API int ssh_channel_request_sftp(ssh_channel channel);
 LIBSSH_API int ssh_channel_request_subsystem(ssh_channel channel, const char *subsystem);
 LIBSSH_API int ssh_channel_request_x11(ssh_channel channel, int single_connection, const char *protocol,
     const char *cookie, int screen_number);
+LIBSSH_API int ssh_channel_request_auth_agent(ssh_channel channel);
 LIBSSH_API int ssh_channel_send_eof(ssh_channel channel);
 LIBSSH_API int ssh_channel_select(ssh_channel *readchans, ssh_channel *writechans, ssh_channel *exceptchans, struct
         timeval * timeout);
@@ -564,11 +569,20 @@ LIBSSH_API int ssh_pki_export_privkey_file(const ssh_key privkey,
                                            void *auth_data,
                                            const char *filename);
 
+LIBSSH_API int ssh_pki_copy_cert_to_privkey(const ssh_key cert_key,
+                                            ssh_key privkey);
+
 LIBSSH_API int ssh_pki_import_pubkey_base64(const char *b64_key,
                                             enum ssh_keytypes_e type,
                                             ssh_key *pkey);
 LIBSSH_API int ssh_pki_import_pubkey_file(const char *filename,
                                           ssh_key *pkey);
+
+LIBSSH_API int ssh_pki_import_cert_base64(const char *b64_cert,
+                                          enum ssh_keytypes_e type,
+                                          ssh_key *pkey);
+LIBSSH_API int ssh_pki_import_cert_file(const char *filename,
+                                        ssh_key *pkey);
 
 LIBSSH_API int ssh_pki_export_privkey_to_pubkey(const ssh_key privkey,
                                                 ssh_key *pkey);
