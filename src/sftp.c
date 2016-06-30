@@ -2015,7 +2015,6 @@ int sftp_async_discard(sftp_file file, uint32_t id) {
   sftp_message msg = NULL;
   sftp_status_message status;
   int err = SSH_OK;
-  uint32_t len;
 
   if (file == NULL) {
     return SSH_ERROR;
