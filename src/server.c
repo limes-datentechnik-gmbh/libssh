@@ -155,12 +155,12 @@ static int server_set_kex(ssh_session session) {
  **/
 static int ssh_server_kexdh_init(ssh_session session, ssh_buffer packet){
     ssh_string e;
-    e = buffer_get_ssh_string(packet);
+    e = ssh_buffer_get_ssh_string(packet);
     if (e == NULL) {
       ssh_set_error(session, SSH_FATAL, "No e number in client request");
       return -1;
     }
-    if (dh_import_e(session, e) < 0) {
+    if (ssh_dh_import_e(session, e) < 0) {
       ssh_set_error(session, SSH_FATAL, "Cannot import e number");
       session->session_state=SSH_SESSION_STATE_ERROR;
     } else {
@@ -258,7 +258,7 @@ int ssh_get_key_params(ssh_session session, ssh_key *privkey){
       return -1;
     }
 
-    dh_import_pubkey(session, pubkey_blob);
+    ssh_dh_import_pubkey(session, pubkey_blob);
     return SSH_OK;
 }
 
@@ -268,16 +268,16 @@ static int dh_handshake_server(ssh_session session) {
   ssh_string f;
   int rc;
 
-  if (dh_generate_y(session) < 0) {
+  if (ssh_dh_generate_y(session) < 0) {
     ssh_set_error(session, SSH_FATAL, "Could not create y number");
     return -1;
   }
-  if (dh_generate_f(session) < 0) {
+  if (ssh_dh_generate_f(session) < 0) {
     ssh_set_error(session, SSH_FATAL, "Could not create f number");
     return -1;
   }
 
-  f = dh_get_f(session);
+  f = ssh_dh_get_f(session);
   if (f == NULL) {
     ssh_set_error(session, SSH_FATAL, "Could not get the f number");
     return -1;
@@ -288,13 +288,13 @@ static int dh_handshake_server(ssh_session session) {
       return -1;
   }
 
-  if (dh_build_k(session) < 0) {
+  if (ssh_dh_build_k(session) < 0) {
     ssh_set_error(session, SSH_FATAL, "Could not import the public key");
     ssh_string_free(f);
     return -1;
   }
 
-  if (make_sessionid(session) != SSH_OK) {
+  if (ssh_make_sessionid(session) != SSH_OK) {
     ssh_set_error(session, SSH_FATAL, "Could not create a session id");
     ssh_string_free(f);
     return -1;
@@ -321,16 +321,16 @@ static int dh_handshake_server(ssh_session session) {
     return -1;
   }
 
-  if (packet_send(session) == SSH_ERROR) {
+  if (ssh_packet_send(session) == SSH_ERROR) {
     return -1;
   }
 
-  if (buffer_add_u8(session->out_buffer, SSH2_MSG_NEWKEYS) < 0) {
+  if (ssh_buffer_add_u8(session->out_buffer, SSH2_MSG_NEWKEYS) < 0) {
     ssh_buffer_reinit(session->out_buffer);
     return -1;
   }
 
-  if (packet_send(session) == SSH_ERROR) {
+  if (ssh_packet_send(session) == SSH_ERROR) {
     return -1;
   }
   SSH_LOG(SSH_LOG_PACKET, "SSH_MSG_NEWKEYS sent");
@@ -432,7 +432,7 @@ static void ssh_server_connection_callback(ssh_session session){
             break;
 		case SSH_SESSION_STATE_DH:
 			if(session->dh_handshake_state==DH_STATE_FINISHED){
-                if (generate_session_keys(session) < 0) {
+                if (ssh_generate_session_keys(session) < 0) {
                   goto error;
                 }
 
@@ -659,7 +659,7 @@ int ssh_auth_reply_default(ssh_session session,int partial) {
       ssh_set_error_oom(session);
       return SSH_ERROR;
   }
-  rc = packet_send(session);
+  rc = ssh_packet_send(session);
   return rc;
 }
 
@@ -680,7 +680,7 @@ static int ssh_message_channel_request_open_reply_default(ssh_message msg) {
         return SSH_ERROR;
     }
 
-    rc = packet_send(msg->session);
+    rc = ssh_packet_send(msg->session);
     return rc;
 }
 
@@ -702,7 +702,7 @@ static int ssh_message_channel_request_reply_default(ssh_message msg) {
         ssh_set_error_oom(msg->session);
         return SSH_ERROR;
     }
-    return packet_send(msg->session);
+    return ssh_packet_send(msg->session);
   }
 
   SSH_LOG(SSH_LOG_PACKET,
@@ -736,7 +736,7 @@ int ssh_message_service_reply_success(ssh_message msg) {
         ssh_set_error_oom(session);
         return SSH_ERROR;
     }
-    rc = packet_send(msg->session);
+    rc = ssh_packet_send(msg->session);
     return rc;
 }
 
@@ -746,7 +746,7 @@ int ssh_message_global_request_reply_success(ssh_message msg, uint16_t bound_por
     SSH_LOG(SSH_LOG_FUNCTIONS, "Accepting a global request");
 
     if (msg->global_request.want_reply) {
-        if (buffer_add_u8(msg->session->out_buffer
+        if (ssh_buffer_add_u8(msg->session->out_buffer
                     , SSH2_MSG_REQUEST_SUCCESS) < 0) {
             goto error;
         }
@@ -760,7 +760,7 @@ int ssh_message_global_request_reply_success(ssh_message msg, uint16_t bound_por
             }
         }
 
-        return packet_send(msg->session);
+        return ssh_packet_send(msg->session);
     }
 
     if(msg->global_request.type == SSH_GLOBAL_REQUEST_TCPIP_FORWARD 
@@ -778,11 +778,11 @@ static int ssh_message_global_request_reply_default(ssh_message msg) {
     SSH_LOG(SSH_LOG_FUNCTIONS, "Refusing a global request");
 
     if (msg->global_request.want_reply) {
-        if (buffer_add_u8(msg->session->out_buffer
+        if (ssh_buffer_add_u8(msg->session->out_buffer
                     , SSH2_MSG_REQUEST_FAILURE) < 0) {
             goto error;
         }
-        return packet_send(msg->session);
+        return ssh_packet_send(msg->session);
     }
     SSH_LOG(SSH_LOG_PACKET,
             "The client doesn't want to know the request failed!");
@@ -919,7 +919,7 @@ int ssh_message_auth_interactive_request(ssh_message msg, const char *name,
     }
   }
 
-  rc = packet_send(msg->session);
+  rc = ssh_packet_send(msg->session);
 
   /* fill in the kbdint structure */
   if (msg->session->kbdint == NULL) {
@@ -1002,11 +1002,11 @@ int ssh_auth_reply_success(ssh_session session, int partial) {
   session->session_state = SSH_SESSION_STATE_AUTHENTICATED;
   session->flags |= SSH_SESSION_FLAG_AUTHENTICATED;
 
-  if (buffer_add_u8(session->out_buffer,SSH2_MSG_USERAUTH_SUCCESS) < 0) {
+  if (ssh_buffer_add_u8(session->out_buffer,SSH2_MSG_USERAUTH_SUCCESS) < 0) {
     return SSH_ERROR;
   }
 
-  r = packet_send(session);
+  r = ssh_packet_send(session);
   if(session->current_crypto && session->current_crypto->delayed_compress_out){
       SSH_LOG(SSH_LOG_PROTOCOL,"Enabling delayed compression OUT");
   	session->current_crypto->do_compress_out=1;
@@ -1041,7 +1041,7 @@ int ssh_message_auth_reply_pk_ok(ssh_message msg, ssh_string algo, ssh_string pu
         return SSH_ERROR;
     }
 
-    rc = packet_send(msg->session);
+    rc = ssh_packet_send(msg->session);
     return rc;
 }
 
@@ -1208,7 +1208,7 @@ int ssh_send_keepalive(ssh_session session)
     goto err;
   }
 
-  if (packet_send(session) == SSH_ERROR) {
+  if (ssh_packet_send(session) == SSH_ERROR) {
     goto err;
   }
 

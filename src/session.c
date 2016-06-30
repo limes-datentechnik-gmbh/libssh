@@ -92,7 +92,7 @@ ssh_session ssh_new(void) {
   session->maxchannel = FIRST_CHANNEL;
 
 #ifndef _WIN32
-    session->agent = agent_new(session);
+    session->agent = ssh_agent_new(session);
     if (session->agent == NULL) {
       goto err;
     }
@@ -117,6 +117,15 @@ ssh_session ssh_new(void) {
 
     session->opts.utf_to_local_func = NULL;
     session->opts.local_to_utf_func = NULL;
+
+    id = strdup("%d/id_ed25519");
+    if (id == NULL) {
+      goto err;
+    }
+    rc = ssh_list_append(session->opts.identity, id);
+    if (rc == SSH_ERROR) {
+      goto err;
+    }
 
 #ifdef HAVE_ECC
     id = strdup("%d/id_ecdsa");
@@ -225,7 +234,7 @@ void ssh_free(ssh_session session) {
   crypto_free(session->next_crypto);
 
 #ifndef _WIN32
-  agent_free(session->agent);
+  ssh_agent_free(session->agent);
 #endif /* _WIN32 */
 
   ssh_key_free(session->srv.dsa_key);
@@ -263,6 +272,9 @@ void ssh_free(ssh_session session) {
       }
       ssh_list_free(session->opts.identity);
   }
+
+  ssh_agent_state_free (session->agent_state);
+  session->agent_state = NULL;
 
   SAFE_FREE(session->auth_auto_state);
   SAFE_FREE(session->serverbanner);
@@ -842,7 +854,7 @@ int ssh_send_ignore (ssh_session session, const char *data) {
             ssh_set_error_oom(session);
             goto error;
         }
-        packet_send(session);
+        ssh_packet_send(session);
         ssh_handle_packets(session, 0);
     }
 
@@ -878,7 +890,7 @@ int ssh_send_debug (ssh_session session, const char *message, int always_display
             ssh_set_error_oom(session);
             goto error;
         }
-        packet_send(session);
+        ssh_packet_send(session);
         ssh_handle_packets(session, 0);
     }
 

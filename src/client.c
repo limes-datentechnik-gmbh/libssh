@@ -90,58 +90,80 @@ static void socket_callback_connected(int code, int errno_code, void *user){
  * @param  user is a pointer to session
  * @returns Number of bytes processed, or zero if the banner is not complete.
  */
-static int callback_receive_banner(const void *data, size_t len, void *user) {
-  char *buffer = (char *)data;
-  ssh_session session=(ssh_session) user;
-  char *str = NULL;
-  size_t i;
-  int ret=0;
+static int callback_receive_banner(const void *data, size_t len, void *user)
+{
+    char *buffer = (char *)data;
+    ssh_session session=(ssh_session) user;
+    char *str = NULL;
+    size_t i;
+    int ret=0;
 
-  if(session->session_state != SSH_SESSION_STATE_SOCKET_CONNECTED){
-  	ssh_set_error(session,SSH_FATAL,"Wrong state in callback_receive_banner : %d",session->session_state);
+    if (session->session_state != SSH_SESSION_STATE_SOCKET_CONNECTED) {
+        ssh_set_error(session,SSH_FATAL,
+                      "Wrong state in callback_receive_banner : %d",
+                      session->session_state);
 
-  	return SSH_ERROR;
-  }
-  for(i=0;i<len;++i){
+        return SSH_ERROR;
+    }
+    for (i = 0; i < len; ++i) {
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
 #ifdef WITH_PCAP
-  	if(session->pcap_ctx && buffer[i] == '\n'){
-  		ssh_pcap_context_write(session->pcap_ctx,SSH_PCAP_DIR_IN,buffer,i+1,i+1);
-  	}
-#endif
-    if(buffer[i]=='\r') {
-        buffer[i]='\0';
-    }
-    if (buffer[i]=='\n') {
-        buffer[i] = '\0';
-        str = strdup(buffer);
-        if (str == NULL) {
-            return SSH_ERROR;
+        if (session->pcap_ctx && buffer[i] == '\n') {
+            ssh_pcap_context_write(session->pcap_ctx,
+                                   SSH_PCAP_DIR_IN,
+                                   buffer,i+1,
+                                   i+1);
         }
-        /* number of bytes read */
-        ret = i + 1;
-        session->serverbanner = str;
-  		session->session_state=SSH_SESSION_STATE_BANNER_RECEIVED;
+#endif
+        if (buffer[i] == '\r') {
+            buffer[i] = '\0';
+        }
+        if (buffer[i] == '\n') {
+            int cmp;
+
+            buffer[i] = '\0';
+
+            /* The server MAY send other lines of data... */
+            cmp = strncmp(buffer, "SSH-", 4);
 #ifdef __EBCDIC__
 #pragma convert(pop)
 #endif
-        SSH_LOG(SSH_LOG_PACKET,"Received banner: %s",ssh_string_for_log(str));
-		session->ssh_connection_callback(session);
+            if (cmp == 0) {
+                str = strdup(buffer);
+                if (str == NULL) {
+                    return SSH_ERROR;
+                }
+                /* number of bytes read */
+                ret = i + 1;
+                session->serverbanner = str;
+                session->session_state = SSH_SESSION_STATE_BANNER_RECEIVED;
+                SSH_LOG(SSH_LOG_PACKET, "Received banner: %s", str);
+                session->ssh_connection_callback(session);
 
-  		return ret;
-  	}
-  	if(i>127){
-  		/* Too big banner */
-  		session->session_state=SSH_SESSION_STATE_ERROR;
-  		ssh_set_error(session,SSH_FATAL,"Receiving banner: too large banner");
+                return ret;
+            } else {
+                SSH_LOG(SSH_LOG_DEBUG,
+                        "ssh_protocol_version_exchange: %s",
+                        buffer);
+                ret = i + 1;
+                break;
+            }
+        }
+        /* According to RFC 4253 the max banner length is 255 */
+        if (i > 255) {
+            /* Too big banner */
+            session->session_state=SSH_SESSION_STATE_ERROR;
+            ssh_set_error(session,
+                          SSH_FATAL,
+                          "Receiving banner: too large banner");
 
-  		return 0;
-  	}
-  }
+            return 0;
+        }
+    }
 
-  return ret;
+    return ret;
 }
 
 /** @internal
@@ -153,52 +175,79 @@ static int callback_receive_banner(const void *data, size_t len, void *user) {
  *
  * @return 0 on success, < 0 on error.
  */
-int ssh_send_banner(ssh_session session, int server) {
-  const char *banner = NULL;
-  char buffer[128] = {0};
-  int err=SSH_ERROR;
+int ssh_send_banner(ssh_session session, int server)
+{
+    const char *banner = NULL;
+    const char *terminator = NULL;
+    /* The maximum banner length is 255 for SSH2 */
+    char buffer[256] = {0};
+    size_t len;
+    int rc = SSH_ERROR;
 
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
 #endif
-  banner = session->version == 1 ? CLIENTBANNER1 : CLIENTBANNER2;
+    banner = session->version == 1 ? CLIENTBANNER1 : CLIENTBANNER2;
+    terminator = session->version == 1 ? "\n" : "\r\n";
 
-  if (server) {
-    if(session->opts.custombanner == NULL){
-    	session->serverbanner = strdup(banner);
-    } else {
-    	session->serverbanner = malloc(strlen(session->opts.custombanner) + 9);
-    	if(!session->serverbanner)
-    		goto end;
-    	strcpy(session->serverbanner, "SSH-2.0-");
-    	strcat(session->serverbanner, session->opts.custombanner);
-    }
+    if (server == 1) {
+        if (session->opts.custombanner == NULL){
+            len = strlen(banner);
+            session->serverbanner = strdup(banner);
+            if (session->serverbanner == NULL) {
+                goto end;
+            }
+        } else {
+            len = strlen(session->opts.custombanner);
+            session->serverbanner = malloc(len + 8 + 1);
+            if(session->serverbanner == NULL) {
+                goto end;
+            }
+            strcpy(session->serverbanner, "SSH-2.0-");
+            strcat(session->serverbanner, session->opts.custombanner);
+        }
+
 #ifdef __EBCDIC__
 #pragma convert(pop)
 #endif
-    if (session->serverbanner == NULL) {
-      goto end;
-    }
-    snprintf(buffer, 128, "%s\x0D\x0A", session->serverbanner);
-  } else {
-    session->clientbanner = strdup(banner);
-    if (session->clientbanner == NULL) {
-      goto end;
-    }
-    snprintf(buffer, 128, "%s\x0D\x0A", session->clientbanner);
-  }
+        snprintf(buffer,
+                 sizeof(buffer),
+                 "%s%s",
+                 session->serverbanner,
+                 terminator);
+    } else {
+        session->clientbanner = strdup(banner);
+        if (session->clientbanner == NULL) {
+            goto end;
+        }
 
-  if (ssh_socket_write(session->socket, buffer, strlen(buffer)) == SSH_ERROR) {
-    goto end;
-  }
+        /* SSH version 1 has a banner length of 128 only */
+        len = session->version == 1 ? 128 : 0;
+
+        snprintf(buffer,
+                 sizeof(buffer) - len,
+                 "%s%s",
+                 session->clientbanner,
+                 terminator);
+    }
+
+    rc = ssh_socket_write(session->socket, buffer, strlen(buffer));
+    if (rc == SSH_ERROR) {
+        goto end;
+    }
 #ifdef WITH_PCAP
-  if(session->pcap_ctx)
-  	ssh_pcap_context_write(session->pcap_ctx,SSH_PCAP_DIR_OUT,buffer,strlen(buffer),strlen(buffer));
+    if (session->pcap_ctx != NULL) {
+        ssh_pcap_context_write(session->pcap_ctx,
+                               SSH_PCAP_DIR_OUT,
+                               buffer,
+                               strlen(buffer),
+                               strlen(buffer));
+    }
 #endif
-  err=SSH_OK;
-end:
 
-  return err;
+    rc = SSH_OK;
+end:
+    return rc;
 }
 
 /** @internal
@@ -296,7 +345,7 @@ int ssh_service_request(ssh_session session, const char *service) {
   }
 
   session->auth_service_state=SSH_AUTH_SERVICE_SENT;
-  if (packet_send(session) == SSH_ERROR) {
+  if (ssh_packet_send(session) == SSH_ERROR) {
     ssh_set_error(session, SSH_FATAL,
         "Sending SSH2_MSG_SERVICE_REQUEST failed.");
       return SSH_ERROR;
@@ -348,7 +397,13 @@ static void ssh_client_connection_callback(ssh_session session){
 	switch(session->session_state){
 		case SSH_SESSION_STATE_NONE:
 		case SSH_SESSION_STATE_CONNECTING:
+			break;
 		case SSH_SESSION_STATE_SOCKET_CONNECTED:
+            /* If SSHv1 is disabled, we can send the banner immedietly */
+            if (session->opts.ssh1 == 0) {
+                ssh_set_fd_towrite(session);
+                ssh_send_banner(session, 0);
+            }
 			break;
 		case SSH_SESSION_STATE_BANNER_RECEIVED:
 		  if (session->serverbanner == NULL) {
@@ -386,15 +441,18 @@ static void ssh_client_connection_callback(ssh_session session){
 		    goto error;
 		  }
 		  /* from now, the packet layer is handling incoming packets */
-		  if(session->version==2)
-		    session->socket_callbacks.data=ssh_packet_socket_callback;
+		  if (session->version == 2) {
+		      ssh_packet_register_socket_callback(session, session->socket);
+		  }
 #ifdef WITH_SSH1
 		  else
 		    session->socket_callbacks.data=ssh_packet_socket_callback1;
 #endif
 		  ssh_packet_set_default_callbacks(session);
 		  session->session_state=SSH_SESSION_STATE_INITIAL_KEX;
-		  ssh_send_banner(session, 0);
+          if (session->opts.ssh1 == 1) {
+              ssh_send_banner(session, 0);
+          }
 		  set_status(session, 0.5f);
 		  break;
 		case SSH_SESSION_STATE_INITIAL_KEX:
@@ -412,7 +470,7 @@ static void ssh_client_connection_callback(ssh_session session){
 		case SSH_SESSION_STATE_KEXINIT_RECEIVED:
 			set_status(session,0.6f);
 			ssh_list_kex(&session->next_crypto->server_kex);
-			if (set_client_kex(session) < 0) {
+			if (ssh_set_client_kex(session) < 0) {
 				goto error;
 			}
 			if (ssh_kex_select_methods(session) == SSH_ERROR)
@@ -663,7 +721,7 @@ void ssh_disconnect(ssh_session session) {
       goto error;
     }
 
-    packet_send(session);
+    ssh_packet_send(session);
     ssh_socket_close(session->socket);
   }
 error:

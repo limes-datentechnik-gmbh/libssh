@@ -167,7 +167,7 @@ int ssh_options_copy(ssh_session src, ssh_session *dest) {
 
 int ssh_options_set_algo(ssh_session session, int algo,
     const char *list) {
-  if (!verify_existing_algo(algo, list)) {
+  if (!ssh_verify_existing_algo(algo, list)) {
     ssh_set_error(session, SSH_REQUEST_DENIED,
         "Setting method: no algorithm for method \"%s\" (%s)\n",
         ssh_kex_get_description(algo), list);
@@ -364,7 +364,7 @@ int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, s
  *              - SSH_OPTIONS_HOSTKEYS:
  *                Set the preferred server host key types (const char *,
  *                comma-separated list). ex:
- *                "ssh-rsa,ssh-dsa,ecdh-sha2-nistp256"
+ *                "ssh-rsa,ssh-dss,ecdh-sha2-nistp256"
  *
  *              - SSH_OPTIONS_COMPRESSION_C_S:
  *                Set the compression to use for client to server
@@ -957,6 +957,17 @@ int ssh_options_get_port(ssh_session session, unsigned int* port_target) {
  *                It may include "%s" which will be replaced by the
  *                user home directory.
  *
+ *              - SSH_OPTIONS_ADD_IDENTITY:
+ *                Add a new identity file (const char *,format string) to
+ *                the identity list.\n
+ *                \n
+ *                By default identity, id_dsa and id_rsa are checked.\n
+ *                \n
+ *                The identity used authenticate with public key will be
+ *                prepended to the list.
+ *                It may include "%s" which will be replaced by the
+ *                user home directory.
+ *
  *              - SSH_OPTIONS_PROXYCOMMAND:
  *                Get the proxycommand necessary to log into the
  *                remote host. When not explicitly set, it will be read
@@ -1200,7 +1211,9 @@ int ssh_options_getopt(ssh_session session, int *argcptr, char **argv) {
     }
   }
 
-  ssh_options_set(session, SSH_OPTIONS_PORT_STR, port);
+  if (port != NULL) {
+    ssh_options_set(session, SSH_OPTIONS_PORT_STR, port);
+  }
 
   ssh_options_set(session, SSH_OPTIONS_SSH1, &ssh1);
   ssh_options_set(session, SSH_OPTIONS_SSH2, &ssh2);

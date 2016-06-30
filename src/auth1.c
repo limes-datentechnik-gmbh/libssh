@@ -23,6 +23,7 @@
 
 #include "config.h"
 
+#include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -103,20 +104,21 @@ static int send_username(ssh_session session, const char *username) {
     return SSH_AUTH_ERROR;
   }
 
-  if (buffer_add_u8(session->out_buffer, SSH_CMSG_USER) < 0) {
+  if (ssh_buffer_add_u8(session->out_buffer, SSH_CMSG_USER) < 0) {
     ssh_string_free(user);
     return SSH_AUTH_ERROR;
   }
-  if (buffer_add_ssh_string(session->out_buffer, user) < 0) {
+  if (ssh_buffer_add_ssh_string(session->out_buffer, user) < 0) {
     ssh_string_free(user);
     return SSH_AUTH_ERROR;
   }
   ssh_string_free(user);
   session->auth_state=SSH_AUTH_STATE_NONE;
   session->auth_service_state = SSH_AUTH_SERVICE_SENT;
-  if (packet_send(session) == SSH_ERROR) {
+  if (ssh_packet_send(session) == SSH_ERROR) {
     return SSH_AUTH_ERROR;
   }
+  return SSH_AUTH_AGAIN;
 pending:
   rc = wait_auth1_status(session);
   switch (rc){
@@ -161,12 +163,14 @@ int ssh_userauth1_password(ssh_session session, const char *username,
   ssh_string pwd = NULL;
   int rc;
 
+  if (session->pending_call_state == SSH_PENDING_CALL_AUTH_PASSWORD) {
+      goto pending;
+  }
+
   rc = send_username(session, username);
   if (rc != SSH_AUTH_DENIED) {
     return rc;
   }
-  if (session->pending_call_state == SSH_PENDING_CALL_AUTH_PASSWORD)
-      goto pending;
   /* we trick a bit here. A known flaw in SSH1 protocol is that it's
    * easy to guess password sizes.
    * not that sure ...
@@ -197,13 +201,13 @@ int ssh_userauth1_password(ssh_session session, const char *username,
     ssh_string_fill(pwd, buf, sizeof(buf));
   }
 
-  if (buffer_add_u8(session->out_buffer, SSH_CMSG_AUTH_PASSWORD) < 0) {
+  if (ssh_buffer_add_u8(session->out_buffer, SSH_CMSG_AUTH_PASSWORD) < 0) {
     ssh_string_burn(pwd);
     ssh_string_free(pwd);
 
     return SSH_AUTH_ERROR;
   }
-  if (buffer_add_ssh_string(session->out_buffer, pwd) < 0) {
+  if (ssh_buffer_add_ssh_string(session->out_buffer, pwd) < 0) {
     ssh_string_burn(pwd);
     ssh_string_free(pwd);
 
@@ -214,13 +218,16 @@ int ssh_userauth1_password(ssh_session session, const char *username,
   ssh_string_free(pwd);
   session->auth_state=SSH_AUTH_STATE_NONE;
   session->pending_call_state = SSH_PENDING_CALL_AUTH_PASSWORD;
-  if (packet_send(session) == SSH_ERROR) {
+  if (ssh_packet_send(session) == SSH_ERROR) {
     return SSH_AUTH_ERROR;
   }
 pending:
   rc = wait_auth1_status(session);
-  if (rc != SSH_AUTH_AGAIN)
-      session->pending_call_state = SSH_PENDING_CALL_NONE;
+  if (rc == SSH_AUTH_ERROR && errno == EAGAIN) {
+    /* Nothing to do */
+  } else if (rc != SSH_AUTH_AGAIN) {
+    session->pending_call_state = SSH_PENDING_CALL_NONE;
+  }
 
   return rc;
 }

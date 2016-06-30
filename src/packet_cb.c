@@ -53,12 +53,12 @@ SSH_PACKET_CALLBACK(ssh_packet_disconnect_callback){
   (void)user;
   (void)type;
 
-  rc = buffer_get_u32(packet, &code);
+  rc = ssh_buffer_get_u32(packet, &code);
   if (rc != 0) {
     code = ntohl(code);
   }
 
-  error_s = buffer_get_ssh_string(packet);
+  error_s = ssh_buffer_get_ssh_string(packet);
   if (error_s != NULL) {
     error = ssh_string_utf8_to_local(session, ssh_string_to_char(error_s));
     ssh_string_free(error_s);
@@ -162,20 +162,20 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
   } else {
     ssh_key key;
     /* client */
-    rc = make_sessionid(session);
+    rc = ssh_make_sessionid(session);
     if (rc != SSH_OK) {
       goto error;
     }
 
     /*
      * Set the cryptographic functions for the next crypto
-     * (it is needed for generate_session_keys for key lengths)
+     * (it is needed for ssh_generate_session_keys for key lengths)
      */
     if (crypt_set_algorithms(session, SSH_3DES) /* knows nothing about DES*/ ) {
       goto error;
     }
 
-    if (generate_session_keys(session) < 0) {
+    if (ssh_generate_session_keys(session) < 0) {
       goto error;
     }
 

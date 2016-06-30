@@ -27,7 +27,9 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #ifndef _WIN32
 # include <dirent.h>
@@ -41,6 +43,11 @@
 #include "torture.h"
 /* for pattern matching */
 #include "match.c"
+
+#define TORTURE_SSHD_SRV_IPV4 "127.0.0.10"
+/* socket wrapper IPv6 prefix  fd00::5357:5fxx */
+#define TORTURE_SSHD_SRV_IPV6 "fd00::5357:5f0a"
+#define TORTURE_SSHD_SRV_PORT 22
 
 static const char torture_rsa_testkey[] =
         "-----BEGIN RSA PRIVATE KEY-----\n"
@@ -274,6 +281,20 @@ static const char torture_ed25519_testkey_pp[]=
         "Y3GsmYTDstmicanQ==\n"
         "-----END OPENSSH PRIVATE KEY-----\n";
 
+static const char torture_rsa_certauth_pub[]=
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCnA2n5vHzZbs/GvRkGloJNV1CXHI"
+        "S5Xnrm05HusUJSWyPq3I1iCMHdYA7oezHa9GCFYbIenaYPy+G6USQRjYQz8SvAZo06"
+        "SFNeJSsa1kAIqxzdPT9kBrRrYK39PZQPsYVfRPqZBdmc+jwrfz97IFEJyXMI47FoTG"
+        "kgEq7eu3z2px/tdIZ34I5Hr5DDBxicZi4jluyRUJHfSPoBxyhF7OkPX4bYkrc691je"
+        "IQDxubl650WYLHgFfad0xTzBIFE6XUb55Dp5AgRdevSoso1Pe0IKFxxMVpP664LCbY"
+        "K06Lv6kcotfFlpvUtR1yx8jToGcSoq5sSzTwvXSHCQQ9ZA1hvF "
+        "torture_certauth_key";
+
+#define TORTURE_SOCKET_DIR "/tmp/test_socket_wrapper_XXXXXX"
+#define TORTURE_SSHD_PIDFILE "sshd/sshd.pid"
+#define TORTURE_SSHD_CONFIG "sshd/sshd_config"
+#define TORTURE_PCAP_FILE "socket_trace.pcap"
+
 static int verbosity = 0;
 static const char *pattern = NULL;
 
@@ -393,6 +414,58 @@ int torture_isdir(const char *path) {
     return 0;
 }
 
+int torture_terminate_process(const char *pidfile)
+{
+    char buf[8] = {0};
+    long int tmp;
+    ssize_t rc;
+    pid_t pid;
+    int fd;
+    int is_running = 1;
+    int count;
+
+    /* read the pidfile */
+    fd = open(pidfile, O_RDONLY);
+    if (fd < 0) {
+        return -1;
+    }
+
+    rc = read(fd, buf, sizeof(buf));
+    close(fd);
+    if (rc <= 0) {
+        return -1;
+    }
+
+    buf[sizeof(buf) - 1] = '\0';
+
+    tmp = strtol(buf, NULL, 10);
+    if (tmp == 0 || tmp > 0xFFFF || errno == ERANGE) {
+        return -1;
+    }
+
+    pid = (pid_t)(tmp & 0xFFFF);
+
+    for (count = 0; count < 10; count++) {
+        /* Make sure the daemon goes away! */
+        kill(pid, SIGTERM);
+
+        usleep(200);
+
+        rc = kill(pid, 0);
+        if (rc != 0) {
+            is_running = 0;
+            break;
+        }
+    }
+
+    if (is_running) {
+        fprintf(stderr,
+                "WARNING: The process server is still running!\n");
+    }
+
+    return 0;
+}
+
 ssh_session torture_ssh_session(const char *host,
                                 const unsigned int *port,
                                 const char *user,
@@ -408,11 +481,6 @@ ssh_session torture_ssh_session(const char *host,
     session = ssh_new();
     if (session == NULL) {
         return NULL;
-    }
-
-    rc = ssh_options_set(session, SSH_OPTIONS_SSH_DIR, "/tmp");
-    if (rc < 0) {
-        goto failed;
     }
 
     if (ssh_options_set(session, SSH_OPTIONS_HOST, host) < 0) {
@@ -452,10 +520,10 @@ ssh_session torture_ssh_session(const char *host,
     }
 
     if (password != NULL) {
-        if (method & SSH_AUTH_METHOD_INTERACTIVE) {
-            rc = _torture_auth_kbdint(session, password);
-        } else if (method & SSH_AUTH_METHOD_PASSWORD) {
+        if (method & SSH_AUTH_METHOD_PASSWORD) {
             rc = ssh_userauth_password(session, NULL, password);
+        } else if (method & SSH_AUTH_METHOD_INTERACTIVE) {
+            rc = _torture_auth_kbdint(session, password);
         }
     } else {
         rc = ssh_userauth_publickey_auto(session, NULL, NULL);
@@ -596,13 +664,6 @@ void torture_sftp_close(struct torture_sftp *t) {
         sftp_free(t->sftp);
     }
 
-    if (t->ssh != NULL) {
-        if (ssh_is_connected(t->ssh)) {
-            ssh_disconnect(t->ssh);
-        }
-        ssh_free(t->ssh);
-    }
-
     free(t->testdir);
     free(t);
 }
@@ -618,7 +679,7 @@ void torture_write_file(const char *filename, const char *data){
     assert_true(filename[0] != '\0');
     assert_non_null(data);
 
-    fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0755);
+    fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0600);
     assert_true(fd >= 0);
 
     rc = write(fd, data, strlen(data));
@@ -704,6 +765,289 @@ const char *torture_get_testkey_pub(enum ssh_keytypes_e type, int ecda_bits)
 const char *torture_get_testkey_passphrase(void)
 {
     return TORTURE_TESTKEY_PASSWORD;
+}
+
+int torture_server_port(void)
+{
+    char *env = getenv("TORTURE_SERVER_PORT");
+
+    if (env != NULL && env[0] != '\0' && strlen(env) < 6) {
+        int port = atoi(env);
+
+        if (port > 0 && port < 65536) {
+            return port;
+        }
+    }
+
+    return TORTURE_SSHD_SRV_PORT;
+}
+
+const char *torture_server_address(int family)
+{
+    switch (family) {
+    case AF_INET: {
+        const char *ip4 = getenv("TORTURE_SERVER_ADDRESS_IPV4");
+
+        if (ip4 != NULL && ip4[0] != '\0') {
+            return ip4;
+        }
+
+        return TORTURE_SSHD_SRV_IPV4;
+    }
+    case AF_INET6: {
+        const char *ip6 = getenv("TORTURE_SERVER_ADDRESS_IPV6");
+
+        if (ip6 != NULL && ip6[0] != '\0') {
+            return ip6;
+        }
+
+        return TORTURE_SSHD_SRV_IPV6;
+    }
+    default:
+        return NULL;
+    }
+
+    return NULL;
+}
+
+void torture_setup_socket_dir(void **state)
+{
+    struct torture_state *s;
+    const char *p;
+    size_t len;
+
+    s = malloc(sizeof(struct torture_state));
+    assert_non_null(s);
+
+    s->socket_dir = strdup(TORTURE_SOCKET_DIR);
+    assert_non_null(s->socket_dir);
+
+    p = mkdtemp(s->socket_dir);
+    assert_non_null(p);
+
+    /* pcap file */
+    len = strlen(p) + 1 + strlen(TORTURE_PCAP_FILE) + 1;
+
+    s->pcap_file = malloc(len);
+    assert_non_null(s->pcap_file);
+
+    snprintf(s->pcap_file, len, "%s/%s", p, TORTURE_PCAP_FILE);
+
+    /* pid file */
+    len = strlen(p) + 1 + strlen(TORTURE_SSHD_PIDFILE) + 1;
+
+    s->srv_pidfile = malloc(len);
+    assert_non_null(s->srv_pidfile);
+
+    snprintf(s->srv_pidfile, len, "%s/%s", p, TORTURE_SSHD_PIDFILE);
+
+    /* config file */
+    len = strlen(p) + 1 + strlen(TORTURE_SSHD_CONFIG) + 1;
+
+    s->srv_config = malloc(len);
+    assert_non_null(s->srv_config);
+
+    snprintf(s->srv_config, len, "%s/%s", p, TORTURE_SSHD_CONFIG);
+
+    setenv("SOCKET_WRAPPER_DIR", p, 1);
+    setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "170", 1);
+    setenv("SOCKET_WRAPPER_PCAP_FILE", s->pcap_file, 1);
+
+    *state = s;
+}
+
+static void torture_setup_create_sshd_config(void **state)
+{
+    struct torture_state *s = *state;
+    char dsa_hostkey[1024];
+    char rsa_hostkey[1024];
+    char ecdsa_hostkey[1024];
+    char trusted_ca_pubkey[1024];
+    char sshd_config[2048];
+    char sshd_path[1024];
+    struct stat sb;
+    const char *sftp_server_locations[] = {
+        "/usr/lib/ssh/sftp-server",
+        "/usr/libexec/sftp-server",
+        "/usr/libexec/openssh/sftp-server",
+        "/usr/lib/openssh/sftp-server",     /* Debian */
+    };
+#ifndef OPENSSH_VERSION_MAJOR
+#define OPENSSH_VERSION_MAJOR 7U
+#define OPENSSH_VERSION_MINOR 0U
+#endif
+    const char config_string[]=
+             "Port 22\n"
+             "ListenAddress 127.0.0.10\n"
+             "HostKey %s\n"
+             "HostKey %s\n"
+             "HostKey %s\n"
+             "\n"
+             "TrustedUserCAKeys %s\n"
+             "\n"
+             "LogLevel DEBUG3\n"
+             "Subsystem sftp %s\n"
+             "\n"
+             "PasswordAuthentication yes\n"
+             "KbdInteractiveAuthentication yes\n"
+             "PubkeyAuthentication yes\n"
+             "\n"
+             "UsePrivilegeSeparation no\n"
+             "StrictModes no\n"
+             "\n"
+             "UsePAM yes\n"
+             "\n"
+#if (OPENSSH_VERSION_MAJOR == 6 && OPENSSH_VERSION_MINOR >= 7) || (OPENSSH_VERSION_MAJOR >= 7)
+             "HostKeyAlgorithms +ssh-dss\n"
+             "Ciphers +3des-cbc,aes128-cbc,aes192-cbc,aes256-cbc,blowfish-cbc\n"
+             "KexAlgorithms +diffie-hellman-group1-sha1"
+#else
+             "Ciphers 3des-cbc,aes128-cbc,aes192-cbc,aes256-cbc,aes128-ctr,"
+                     "aes192-ctr,aes256-ctr,aes128-gcm@openssh.com,"
+                     "aes256-gcm@openssh.com,arcfour128,arcfour256,arcfour,"
+                     "blowfish-cbc,cast128-cbc,chacha20-poly1305@openssh.com\n"
+             "KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp256,"
+                           "ecdh-sha2-nistp384,ecdh-sha2-nistp521,"
+                           "diffie-hellman-group-exchange-sha256,"
+                           "diffie-hellman-group-exchange-sha1,"
+                           "diffie-hellman-group14-sha1,"
+                           "diffie-hellman-group1-sha1\n"
+#endif
+             "\n"
+             "AcceptEnv LANG LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES\n"
+             "AcceptEnv LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT\n"
+             "AcceptEnv LC_IDENTIFICATION LC_ALL LC_LIBSSH\n"
+             "\n"
+             "PidFile %s\n";
+    size_t sftp_sl_size = ARRAY_SIZE(sftp_server_locations);
+    const char *sftp_server;
+    size_t i;
+    int rc;
+
+    snprintf(sshd_path,
+             sizeof(sshd_path),
+             "%s/sshd",
+             s->socket_dir);
+
+    rc = mkdir(sshd_path, 0755);
+    assert_return_code(rc, errno);
+
+    snprintf(dsa_hostkey,
+             sizeof(dsa_hostkey),
+             "%s/sshd/ssh_host_dsa_key",
+             s->socket_dir);
+    torture_write_file(dsa_hostkey, torture_get_testkey(SSH_KEYTYPE_DSS, 0, 0));
+
+    snprintf(rsa_hostkey,
+             sizeof(rsa_hostkey),
+             "%s/sshd/ssh_host_rsa_key",
+             s->socket_dir);
+    torture_write_file(rsa_hostkey, torture_get_testkey(SSH_KEYTYPE_RSA, 0, 0));
+
+    snprintf(ecdsa_hostkey,
+             sizeof(ecdsa_hostkey),
+             "%s/sshd/ssh_host_ecdsa_key",
+             s->socket_dir);
+    torture_write_file(ecdsa_hostkey,
+                       torture_get_testkey(SSH_KEYTYPE_ECDSA, 521, 0));
+
+    snprintf(trusted_ca_pubkey,
+             sizeof(trusted_ca_pubkey),
+             "%s/sshd/user_ca.pub",
+             s->socket_dir);
+    torture_write_file(trusted_ca_pubkey, torture_rsa_certauth_pub);
+
+    assert_non_null(s->socket_dir);
+
+    sftp_server = getenv("TORTURE_SFTP_SERVER");
+    if (sftp_server == NULL) {
+        for (i = 0; i < sftp_sl_size; i++) {
+            sftp_server = sftp_server_locations[i];
+            rc = lstat(sftp_server, &sb);
+            if (rc == 0) {
+                break;
+            }
+        }
+    }
+    assert_non_null(sftp_server);
+
+    snprintf(sshd_config, sizeof(sshd_config),
+             config_string,
+             dsa_hostkey,
+             rsa_hostkey,
+             ecdsa_hostkey,
+             trusted_ca_pubkey,
+             sftp_server,
+             s->srv_pidfile);
+
+    torture_write_file(s->srv_config, sshd_config);
+}
+
+void torture_setup_sshd_server(void **state)
+{
+    struct torture_state *s;
+    char sshd_start_cmd[1024];
+    int rc;
+
+    torture_setup_socket_dir(state);
+    torture_setup_create_sshd_config(state);
+
+    /* Set the default interface for the server */
+    setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "10", 1);
+    setenv("PAM_WRAPPER", "1", 1);
+
+    s = *state;
+
+    snprintf(sshd_start_cmd, sizeof(sshd_start_cmd),
+             "/usr/sbin/sshd -r -f %s -E %s/sshd/daemon.log 2> %s/sshd/cwrap.log",
+             s->srv_config, s->socket_dir, s->socket_dir);
+
+    rc = system(sshd_start_cmd);
+    assert_return_code(rc, errno);
+
+    /* Give the process some time to start */
+    usleep(500);
+
+    setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "21", 1);
+    unsetenv("PAM_WRAPPER");
+}
+
+void torture_teardown_socket_dir(void **state)
+{
+    struct torture_state *s = *state;
+    char *env = getenv("TORTURE_SKIP_CLEANUP");
+    int rc;
+
+    if (env != NULL && env[0] == '1') {
+        fprintf(stderr, "[ TORTURE  ] >>> Skipping cleanup of %s\n", s->socket_dir);
+    } else {
+        rc = torture_rmdirs(s->socket_dir);
+        if (rc < 0) {
+            fprintf(stderr,
+                    "torture_rmdirs(%s) failed: %s",
+                    s->socket_dir,
+                    strerror(errno));
+        }
+    }
+
+    free(s->srv_config);
+    free(s->socket_dir);
+    free(s->pcap_file);
+    free(s->srv_pidfile);
+    free(s);
+}
+
+void torture_teardown_sshd_server(void **state)
+{
+    struct torture_state *s = *state;
+    int rc;
+
+    rc = torture_terminate_process(s->srv_pidfile);
+    if (rc != 0) {
+        fprintf(stderr, "XXXXXX Failed to terminate sshd\n");
+    }
+
+    torture_teardown_socket_dir(state);
 }
 
 int torture_libssh_verbosity(void){

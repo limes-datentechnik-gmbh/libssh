@@ -1,7 +1,5 @@
 include(CheckIncludeFile)
-if (WIN32)
 include(CheckIncludeFiles)
-endif (WIN32)
 include(CheckSymbolExists)
 include(CheckFunctionExists)
 include(CheckLibraryExists)
@@ -49,7 +47,11 @@ int main(void){ return 0; }
 endif(CMAKE_COMPILER_IS_GNUCC AND NOT MINGW AND NOT OS2)
 
 # HEADER FILES
+set(CMAKE_REQUIRED_INCLUDES_SAVE ${CMAKE_REQUIRED_INCLUDES})
+set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES} ${ARGP_INCLUDE_DIR})
 check_include_file(argp.h HAVE_ARGP_H)
+set(CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES_SAVE})
+
 check_include_file(pty.h HAVE_PTY_H)
 check_include_file(utmp.h HAVE_UTMP_H)
 check_include_file(termios.h HAVE_TERMIOS_H)
@@ -122,8 +124,9 @@ endif (NOT WITH_GCRYPT)
 
 check_function_exists(isblank HAVE_ISBLANK)
 check_function_exists(strncpy HAVE_STRNCPY)
-check_function_exists(vsnprintf HAVE_VSNPRINTF)
-check_function_exists(snprintf HAVE_SNPRINTF)
+
+check_symbol_exists(vsnprintf "stdio.h" HAVE_VSNPRINTF)
+check_symbol_exists(snprintf "stdio.h" HAVE_SNPRINTF)
 
 if (WIN32)
     check_function_exists(_strtoui64 HAVE__STRTOUI64)

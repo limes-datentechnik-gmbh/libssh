@@ -240,7 +240,7 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
 
             memcpy(buffer, data, blocksize);
             processed += blocksize;
-            len = packet_decrypt_len(session, buffer);
+            len = ssh_packet_decrypt_len(session, buffer);
 
             rc = ssh_buffer_add_data(session->in_buffer, buffer, blocksize);
             if (rc < 0) {
@@ -301,14 +301,14 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
                  * Decrypt the rest of the packet (blocksize bytes already
                  * have been decrypted)
                  */
-                uint32_t buffer_len = buffer_get_rest_len(session->in_buffer);
+                uint32_t buffer_len = ssh_buffer_get_len(session->in_buffer);
 
                 /* The following check avoids decrypting zero bytes */
                 if (buffer_len > blocksize) {
-                    uint8_t *payload = ((uint8_t*)buffer_get_rest(session->in_buffer) + blocksize);
+                    uint8_t *payload = ((uint8_t*)ssh_buffer_get(session->in_buffer) + blocksize);
                     uint32_t plen = buffer_len - blocksize;
 
-                    rc = packet_decrypt(session, payload, plen);
+                    rc = ssh_packet_decrypt(session, payload, plen);
                     if (rc < 0) {
                         ssh_set_error(session, SSH_FATAL, "Decrypt error");
                         goto error;
@@ -319,7 +319,7 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
                 packet = ((uint8_t *)data) + processed;
                 memcpy(mac, packet, current_macsize);
 
-                rc = packet_hmac_verify(session, session->in_buffer, mac, session->current_crypto->in_hmac);
+                rc = ssh_packet_hmac_verify(session, session->in_buffer, mac, session->current_crypto->in_hmac);
                 if (rc < 0) {
                     ssh_set_error(session, SSH_FATAL, "HMAC error");
                     goto error;
@@ -328,9 +328,9 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
             }
 
             /* skip the size field which has been processed before */
-            buffer_pass_bytes(session->in_buffer, sizeof(uint32_t));
+            ssh_buffer_pass_bytes(session->in_buffer, sizeof(uint32_t));
 
-            rc = buffer_get_u8(session->in_buffer, &padding);
+            rc = ssh_buffer_get_u8(session->in_buffer, &padding);
             if (rc == 0) {
                 ssh_set_error(session,
                               SSH_FATAL,
@@ -338,28 +338,28 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
                 goto error;
             }
 
-            if (padding > buffer_get_rest_len(session->in_buffer)) {
+            if (padding > ssh_buffer_get_len(session->in_buffer)) {
                 ssh_set_error(session,
                               SSH_FATAL,
                               "Invalid padding: %d (%d left)",
                               padding,
-                              buffer_get_rest_len(session->in_buffer));
+                              ssh_buffer_get_len(session->in_buffer));
                 goto error;
             }
-            buffer_pass_bytes_end(session->in_buffer, padding);
-            compsize = buffer_get_rest_len(session->in_buffer);
+            ssh_buffer_pass_bytes_end(session->in_buffer, padding);
+            compsize = ssh_buffer_get_len(session->in_buffer);
 
 #ifdef WITH_ZLIB
             if (session->current_crypto
                 && session->current_crypto->do_compress_in
-                && buffer_get_rest_len(session->in_buffer) > 0) {
+                && ssh_buffer_get_len(session->in_buffer) > 0) {
                 rc = decompress_buffer(session, session->in_buffer,MAX_PACKET_LEN);
                 if (rc < 0) {
                     goto error;
                 }
             }
 #endif /* WITH_ZLIB */
-            payloadsize = buffer_get_rest_len(session->in_buffer);
+            payloadsize = ssh_buffer_get_len(session->in_buffer);
             session->recv_seq++;
             if (session->raw_counter != NULL) {
                 session->raw_counter->in_bytes += payloadsize;
@@ -414,11 +414,34 @@ error:
     return processed;
 }
 
+static void ssh_packet_socket_controlflow_callback(int code, void *userdata)
+{
+    ssh_session session = userdata;
+    struct ssh_iterator *it;
+    ssh_channel channel;
+
+    if (code == SSH_SOCKET_FLOW_WRITEWONTBLOCK) {
+        SSH_LOG(SSH_LOG_TRACE, "sending channel_write_wontblock callback");
+
+        /* the out pipe is empty so we can forward this to channels */
+        it = ssh_list_get_iterator(session->channels);
+        while (it != NULL) {
+            channel = ssh_iterator_value(ssh_channel, it);
+            ssh_callbacks_execute_list(channel->callbacks,
+                                       ssh_channel_callbacks,
+                                       channel_write_wontblock_function,
+                                       session,
+                                       channel,
+                                       channel->remote_window);
+            it = it->next;
+        }
+    }
+}
+
 void ssh_packet_register_socket_callback(ssh_session session, ssh_socket s){
 	session->socket_callbacks.data=ssh_packet_socket_callback;
 	session->socket_callbacks.connected=NULL;
-	session->socket_callbacks.controlflow=NULL;
-	session->socket_callbacks.exception=NULL;
+    session->socket_callbacks.controlflow = ssh_packet_socket_controlflow_callback;
 	session->socket_callbacks.userdata=session;
 	ssh_socket_set_callbacks(s,&session->socket_callbacks);
 }
@@ -506,7 +529,7 @@ int ssh_packet_send_unimplemented(ssh_session session, uint32_t seqnum){
         ssh_set_error_oom(session);
         return SSH_ERROR;
     }
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
 
     return rc;
 }
@@ -543,7 +566,7 @@ int ssh_packet_parse_type(ssh_session session) {
     return SSH_ERROR;
   }
 
-  if(buffer_get_u8(session->in_buffer, &session->in_packet.type) == 0) {
+  if(ssh_buffer_get_u8(session->in_buffer, &session->in_packet.type) == 0) {
     ssh_set_error(session, SSH_FATAL, "Packet too short to read type");
     return SSH_ERROR;
   }
@@ -561,8 +584,8 @@ static int ssh_packet_write(ssh_session session) {
   int rc = SSH_ERROR;
 
   rc=ssh_socket_write(session->socket,
-      buffer_get_rest(session->out_buffer),
-      buffer_get_rest_len(session->out_buffer));
+      ssh_buffer_get(session->out_buffer),
+      ssh_buffer_get_len(session->out_buffer));
 
   return rc;
 }
@@ -572,7 +595,7 @@ static int packet_send2(ssh_session session) {
       session->current_crypto->out_cipher->blocksize : 8);
   enum ssh_hmac_e hmac_type = (session->current_crypto ?
       session->current_crypto->out_hmac : session->next_crypto->out_hmac);
-  uint32_t currentlen = buffer_get_rest_len(session->out_buffer);
+  uint32_t currentlen = ssh_buffer_get_len(session->out_buffer);
   unsigned char *hmac = NULL;
   char padstring[32] = { 0 };
   int rc = SSH_ERROR;
@@ -593,11 +616,11 @@ static int packet_send2(ssh_session session) {
 #ifdef WITH_ZLIB
   if (session->current_crypto
       && session->current_crypto->do_compress_out
-      && buffer_get_rest_len(session->out_buffer)) {
+      && ssh_buffer_get_len(session->out_buffer)) {
     if (compress_buffer(session,session->out_buffer) < 0) {
       goto error;
     }
-    currentlen = buffer_get_rest_len(session->out_buffer);
+    currentlen = ssh_buffer_get_len(session->out_buffer);
   }
 #endif /* WITH_ZLIB */
   compsize = currentlen;
@@ -614,7 +637,7 @@ static int packet_send2(ssh_session session) {
 
   memcpy(&header[0], &finallen, sizeof(finallen));
   header[sizeof(finallen)] = padding;
-  rc = buffer_prepend_data(session->out_buffer, &header, sizeof(header));
+  rc = ssh_buffer_prepend_data(session->out_buffer, &header, sizeof(header));
   if (rc < 0) {
     goto error;
   }
@@ -625,12 +648,12 @@ static int packet_send2(ssh_session session) {
 #ifdef WITH_PCAP
   if(session->pcap_ctx){
   	ssh_pcap_context_write(session->pcap_ctx,SSH_PCAP_DIR_OUT,
-  			buffer_get_rest(session->out_buffer),buffer_get_rest_len(session->out_buffer)
-  			,buffer_get_rest_len(session->out_buffer));
+  			ssh_buffer_get(session->out_buffer),ssh_buffer_get_len(session->out_buffer)
+  			,ssh_buffer_get_len(session->out_buffer));
   }
 #endif
-  hmac = packet_encrypt(session, buffer_get_rest(session->out_buffer),
-      buffer_get_rest_len(session->out_buffer));
+  hmac = ssh_packet_encrypt(session, ssh_buffer_get(session->out_buffer),
+      ssh_buffer_get_len(session->out_buffer));
   if (hmac) {
     rc = ssh_buffer_add_data(session->out_buffer, hmac, hmac_digest_len(hmac_type));
     if (rc < 0) {
@@ -657,10 +680,10 @@ error:
 }
 
 
-int packet_send(ssh_session session) {
+int ssh_packet_send(ssh_session session) {
 #ifdef WITH_SSH1
   if (session->version == 1) {
-    return packet_send1(session);
+    return ssh_packet_send1(session);
   }
 #endif
   return packet_send2(session);

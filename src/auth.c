@@ -164,7 +164,7 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_banner){
   (void)type;
   (void)user;
 
-  banner = buffer_get_ssh_string(packet);
+  banner = ssh_buffer_get_ssh_string(packet);
   if (banner == NULL) {
     SSH_LOG(SSH_LOG_WARN,
         "Invalid SSH_USERAUTH_BANNER packet");
@@ -430,7 +430,7 @@ int ssh_userauth_none(ssh_session session, const char *username) {
 
     session->auth_state = SSH_AUTH_STATE_NONE;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_NONE;
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
         SAFE_FREE(usernameConv);
         return SSH_AUTH_ERROR;
@@ -472,7 +472,7 @@ fail:
  *          SSH_AUTH_PARTIAL: You've been partially authenticated, you still
  *                            have to use another method.\n
  *          SSH_AUTH_SUCCESS: The public key is accepted, you want now to use
- *                            ssh_userauth_pubkey().
+ *                            ssh_userauth_publickey().\n
  *          SSH_AUTH_AGAIN:   In nonblocking mode, you've got to call this again
  *                            later.
  *
@@ -570,7 +570,7 @@ int ssh_userauth_try_publickey(ssh_session session,
 
     session->auth_state = SSH_AUTH_STATE_NONE;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_OFFER_PUBKEY;
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
         return SSH_AUTH_ERROR;
     }
@@ -591,7 +591,7 @@ fail:
 }
 
 /**
- * @brief Authenticate with public/private key.
+ * @brief Authenticate with public/private key or certificate.
  *
  * @param[in] session     The SSH session.
  *
@@ -605,8 +605,7 @@ fail:
  *                            method.\n
  *          SSH_AUTH_PARTIAL: You've been partially authenticated, you still
  *                            have to use another method.\n
- *          SSH_AUTH_SUCCESS: The public key is accepted, you want now to use
- *                            ssh_userauth_pubkey().
+ *          SSH_AUTH_SUCCESS: The public key is accepted.\n
  *          SSH_AUTH_AGAIN:   In nonblocking mode, you've got to call this again
  *                            later.
  *
@@ -620,6 +619,8 @@ int ssh_userauth_publickey(ssh_session session,
 {
     ssh_string str = NULL;
     int rc;
+    const char *type_c;
+    enum ssh_keytypes_e key_type;
     char* usernameCpy;
     char* usernameConv;
 #ifdef __EBCDIC__
@@ -654,7 +655,7 @@ int ssh_userauth_publickey(ssh_session session,
         default:
             ssh_set_error(session,
                           SSH_FATAL,
-                          "Bad call during pending SSH call in ssh_userauth_try_pubkey");
+                          "Bad call during pending SSH call in ssh_userauth_try_publickey");
             return SSH_AUTH_ERROR;
     }
 
@@ -665,7 +666,11 @@ int ssh_userauth_publickey(ssh_session session,
         return SSH_AUTH_ERROR;
     }
 
-    /* public key */
+    /* Cert auth requires presenting the cert type name (*-cert@openssh.com) */
+    key_type = privkey->cert != NULL ? privkey->cert_type : privkey->type;
+    type_c = ssh_key_type_to_char(key_type);
+
+    /* get public key or cert */
     rc = ssh_pki_export_pubkey_blob(privkey, &str);
     if (rc < 0) {
         goto fail;
@@ -692,8 +697,8 @@ int ssh_userauth_publickey(ssh_session session,
             str_ssh_connection,
             str_publickey,
             1, /* private key */
-            privkey->type_c, /* algo */
-            str /* public key */
+            type_c, /* algo */
+            str /* public key or cert */
             );
     SAFE_FREE(usernameConv);
     if (rc < 0) {
@@ -707,7 +712,7 @@ int ssh_userauth_publickey(ssh_session session,
         goto fail;
     }
 
-    rc = buffer_add_ssh_string(session->out_buffer, str);
+    rc = ssh_buffer_add_ssh_string(session->out_buffer, str);
     ssh_string_free(str);
     str = NULL;
     if (rc < 0) {
@@ -716,7 +721,7 @@ int ssh_userauth_publickey(ssh_session session,
 
     session->auth_state = SSH_AUTH_STATE_NONE;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_PUBKEY;
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
         return SSH_AUTH_ERROR;
     }
@@ -762,7 +767,7 @@ static int ssh_userauth_agent_publickey(ssh_session session,
         default:
             ssh_set_error(session,
                           SSH_FATAL,
-                          "Bad call during pending SSH call in ssh_userauth_try_pubkey");
+                          "Bad call during pending SSH call in ssh_userauth_try_publickey");
             return SSH_ERROR;
     }
 
@@ -817,7 +822,7 @@ static int ssh_userauth_agent_publickey(ssh_session session,
         goto fail;
     }
 
-    rc = buffer_add_ssh_string(session->out_buffer, str);
+    rc = ssh_buffer_add_ssh_string(session->out_buffer, str);
     ssh_string_free(str);
     if (rc < 0) {
         goto fail;
@@ -825,7 +830,7 @@ static int ssh_userauth_agent_publickey(ssh_session session,
 
     session->auth_state = SSH_AUTH_STATE_NONE;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_AGENT;
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
         return SSH_AUTH_ERROR;
     }
@@ -857,6 +862,15 @@ struct ssh_agent_state_struct {
     char *comment;
 };
 
+/* Internal function */
+void ssh_agent_state_free(void *data) {
+    struct ssh_agent_state_struct *state = data;
+    if (state) {
+        ssh_string_free_char(state->comment);
+        ssh_key_free(state->pubkey);
+        free (state);
+    }
+}
 
 /**
  * @brief Try to do public key authentication with ssh agent.
@@ -872,7 +886,7 @@ struct ssh_agent_state_struct {
  *          SSH_AUTH_PARTIAL: You've been partially authenticated, you still
  *                            have to use another method.\n
  *          SSH_AUTH_SUCCESS: The public key is accepted, you want now to use
- *                            ssh_userauth_pubkey().
+ *                            ssh_userauth_publickey().\n
  *          SSH_AUTH_AGAIN:   In nonblocking mode, you've got to call this again
  *                            later.
  *
@@ -888,7 +902,7 @@ int ssh_userauth_agent(ssh_session session,
         return SSH_AUTH_ERROR;
     }
 
-    if (!agent_is_running(session)) {
+    if (!ssh_agent_is_running(session)) {
         SSH_LOG(SSH_LOG_DEBUG,
                 "Agent is not running");
         return SSH_AUTH_DENIED;
@@ -919,9 +933,8 @@ int ssh_userauth_agent(ssh_session session,
                 state->state == SSH_AGENT_STATE_PUBKEY){
             rc = ssh_userauth_try_publickey(session, username, state->pubkey);
             if (rc == SSH_AUTH_ERROR) {
-                ssh_string_free_char(state->comment);
-                ssh_key_free(state->pubkey);
-                SAFE_FREE(session->agent_state);
+                ssh_agent_state_free (state);
+                session->agent_state = NULL;
                 return rc;
             } else if (rc == SSH_AUTH_AGAIN) {
                 state->state = SSH_AGENT_STATE_PUBKEY;
@@ -930,6 +943,7 @@ int ssh_userauth_agent(ssh_session session,
                 SSH_LOG(SSH_LOG_DEBUG,
                         "Public key of %s refused by server", state->comment);
                 ssh_string_free_char(state->comment);
+                state->comment = NULL;
                 ssh_key_free(state->pubkey);
                 state->pubkey = ssh_agent_get_next_ident(session, &state->comment);
                 state->state = SSH_AGENT_STATE_NONE;
@@ -945,23 +959,27 @@ int ssh_userauth_agent(ssh_session session,
             if (rc == SSH_AUTH_AGAIN)
                 return rc;
             ssh_string_free_char(state->comment);
-            ssh_key_free(state->pubkey);
+            state->comment = NULL;
             if (rc == SSH_AUTH_ERROR) {
-                SAFE_FREE(session->agent_state);
+                ssh_agent_state_free (session->agent_state);
+                session->agent_state = NULL;
                 return rc;
             } else if (rc != SSH_AUTH_SUCCESS) {
                 SSH_LOG(SSH_LOG_INFO,
                         "Server accepted public key but refused the signature");
+                ssh_key_free(state->pubkey);
                 state->pubkey = ssh_agent_get_next_ident(session, &state->comment);
                 state->state = SSH_AGENT_STATE_NONE;
                 continue;
             }
-            SAFE_FREE(session->agent_state);
+            ssh_agent_state_free (session->agent_state);
+            session->agent_state = NULL;
             return SSH_AUTH_SUCCESS;
         }
     }
 
-    SAFE_FREE(session->agent_state);
+    ssh_agent_state_free (session->agent_state);
+    session->agent_state = NULL;
     return rc;
 }
 #endif
@@ -1001,7 +1019,7 @@ struct ssh_auth_auto_state_struct {
  *          SSH_AUTH_PARTIAL: You've been partially authenticated, you still
  *                            have to use another method.\n
  *          SSH_AUTH_SUCCESS: The public key is accepted, you want now to use
- *                            ssh_userauth_pubkey().
+ *                            ssh_userauth_publickey().\n
  *          SSH_AUTH_AGAIN:   In nonblocking mode, you've got to call this again
  *                            later.
  *
@@ -1323,7 +1341,7 @@ int ssh_userauth_password(ssh_session session,
 
     session->auth_state = SSH_AUTH_STATE_NONE;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_OFFER_PUBKEY;
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
         SAFE_FREE(passwordConv);
         SAFE_FREE(usernameConv);
@@ -1524,7 +1542,7 @@ static int ssh_userauth_kbdint_init(ssh_session session,
     SSH_LOG(SSH_LOG_DEBUG,
             "Sending keyboard-interactive init request");
 
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
         return SSH_AUTH_ERROR;
     }
@@ -1585,7 +1603,7 @@ static int ssh_userauth_kbdint_send(ssh_session session)
     SSH_LOG(SSH_LOG_DEBUG,
             "Sending keyboard-interactive response packet");
 
-    rc = packet_send(session);
+    rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
         return SSH_AUTH_ERROR;
     }
