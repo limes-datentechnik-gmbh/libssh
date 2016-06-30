@@ -1667,6 +1667,7 @@ sftp_file sftp_open(sftp_session sftp, const char *file, int flags,
   sftp_file handle;
   ssh_string filename;
   ssh_buffer buffer;
+  sftp_attributes statData;
   uint32_t sftp_flags = 0;
   uint32_t id;
   char* fileCpy;
@@ -1707,18 +1708,20 @@ sftp_file sftp_open(sftp_session sftp, const char *file, int flags,
   attr.permissions = mode;
   attr.flags = SSH_FILEXFER_ATTR_PERMISSIONS;
 
-  if ((flags & O_RDONLY) == O_RDONLY)
-    sftp_flags |= SSH_FXF_READ;
-  if ((flags & O_WRONLY) == O_WRONLY)
-    sftp_flags |= SSH_FXF_WRITE;
   if ((flags & O_RDWR) == O_RDWR)
     sftp_flags |= (SSH_FXF_WRITE | SSH_FXF_READ);
+  else if ((flags & O_WRONLY) == O_WRONLY)
+    sftp_flags |= SSH_FXF_WRITE;
+  else
+    sftp_flags |= SSH_FXF_READ;
   if ((flags & O_CREAT) == O_CREAT)
     sftp_flags |= SSH_FXF_CREAT;
   if ((flags & O_TRUNC) == O_TRUNC)
     sftp_flags |= SSH_FXF_TRUNC;
   if ((flags & O_EXCL) == O_EXCL)
     sftp_flags |= SSH_FXF_EXCL;
+  if ((flags & O_APPEND) == O_APPEND)
+    sftp_flags |= SSH_FXF_APPEND;
   SSH_LOG(SSH_LOG_PACKET,"Opening file %s with sftp flags %x",file,sftp_flags);
   id = sftp_get_new_id(sftp);
   if (ssh_buffer_add_u32(buffer, htonl(id)) < 0 ||
@@ -1766,6 +1769,19 @@ sftp_file sftp_open(sftp_session sftp, const char *file, int flags,
     case SSH_FXP_HANDLE:
       handle = parse_handle_msg(msg);
       sftp_message_free(msg);
+      if ((flags & O_APPEND) == O_APPEND) {
+        statData = sftp_stat(sftp, file);
+        if (statData==NULL) {
+          sftp_close(handle);
+          return NULL;
+        }
+        if ((statData->flags & SSH_FILEXFER_ATTR_SIZE) != SSH_FILEXFER_ATTR_SIZE) {
+          ssh_set_error(sftp->session, SSH_FATAL, "Cannot open in append mode. Unknown file size.");
+          sftp_close(handle);
+          return NULL;
+        }
+        handle->offset = statData->size;
+      }
       return handle;
     default:
       ssh_set_error(sftp->session, SSH_FATAL,
