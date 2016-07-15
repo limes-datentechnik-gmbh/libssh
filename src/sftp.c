@@ -1942,6 +1942,92 @@ int sftp_async_read_begin(sftp_file file, uint32_t len){
   return id;
 }
 
+/* Wait for an asynchronous read to complete and return the sftp message and
+ * buffer pointer to the beginning of the data. The msgHdl must be passed to
+ * sftp_async_freemsg() when the buffer is no longer needed. */
+int sftp_async_readmsg(sftp_file file, sftp_message* msgHdl, uint32_t id) {
+  sftp_session sftp;
+  sftp_message msg = NULL;
+  sftp_status_message status;
+  int err = SSH_OK;
+  uint32_t len;
+
+  if (file == NULL) {
+    return SSH_ERROR;
+  }
+  sftp = file->sftp;
+
+  if (file->eof) {
+    return 0;
+  }
+
+  /* handle an existing request */
+  while (msg == NULL) {
+    if (file->nonblocking){
+      if (ssh_channel_poll(sftp->channel, 0) == 0) {
+        /* we cannot block */
+        return SSH_AGAIN;
+      }
+    }
+
+    if (sftp_read_and_dispatch(sftp) < 0) {
+      /* something nasty has happened */
+      return SSH_ERROR;
+    }
+
+    msg = sftp_dequeue(sftp,id);
+  }
+
+  switch (msg->packet_type) {
+    case SSH_FXP_STATUS:
+      status = parse_status_msg(msg);
+      sftp_message_free(msg);
+      if (status == NULL) {
+        return -1;
+      }
+      sftp_set_error(sftp, status->status);
+      if (status->status != SSH_FX_EOF) {
+        ssh_set_error(sftp->session, SSH_REQUEST_DENIED,
+            "SFTP server : %s", status->errormsg);
+        err = SSH_ERROR;
+      } else {
+        file->eof = 1;
+      }
+      status_msg_free(status);
+      return err;
+    case SSH_FXP_DATA:
+      // read length field from message buffer
+      if (ssh_buffer_get_u32(msg->payload, &len) == 0) {
+        ssh_set_error(sftp->session, SSH_FATAL,
+            "Received invalid DATA packet from sftp server (no length field)");
+        return SSH_ERROR;
+      }
+      len = ntohl(len);
+      // verify if there is enough data in the buffer (buffer overflow protection)
+      if (msg->payload->pos + len < len || msg->payload->pos + len > msg->payload->used) {
+        ssh_set_error(sftp->session, SSH_FATAL,
+            "Received invalid DATA packet from sftp server (length field mismatch)");
+        return SSH_ERROR;
+      }
+      // pass message handle and pointer to the start of data to the caller
+      *msgHdl = msg;
+
+      return len;
+    default:
+      ssh_set_error(sftp->session,SSH_FATAL,"Received message %d during read!",msg->packet_type);
+      sftp_message_free(msg);
+      return SSH_ERROR;
+  }
+
+  return SSH_ERROR;
+}
+
+/* deallocates a message from sftp_async_readmsg() */
+void sftp_async_freemsg(sftp_message msg) {
+  sftp_message_free(msg);
+}
+
+
 /* Wait for an asynchronous read to complete and save the data. */
 int sftp_async_read(sftp_file file, void *data, uint32_t size, uint32_t id){
   sftp_session sftp;
@@ -2025,7 +2111,6 @@ int sftp_async_read(sftp_file file, void *data, uint32_t size, uint32_t id){
   return SSH_ERROR;
 }
 
-// TODO: file->offset updaten
 int sftp_async_discard(sftp_file file, uint32_t id) {
   sftp_session sftp;
   sftp_message msg = NULL;
