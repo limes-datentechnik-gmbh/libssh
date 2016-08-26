@@ -1963,6 +1963,7 @@ int sftp_async_readmsg(sftp_file file, sftp_message* msgHdl, uint32_t id) {
   }
 
   /* handle an existing request */
+  msg = sftp_dequeue(sftp,id);
   while (msg == NULL) {
     if (file->nonblocking){
       if (ssh_channel_poll(sftp->channel, 0) == 0) {
@@ -2048,6 +2049,7 @@ int sftp_async_read(sftp_file file, void *data, uint32_t size, uint32_t id){
   }
 
   /* handle an existing request */
+  msg = sftp_dequeue(file->sftp, id);
   while (msg == NULL) {
     if (file->nonblocking){
       if (ssh_channel_poll(sftp->channel, 0) == 0) {
@@ -2128,6 +2130,7 @@ int sftp_async_discard(sftp_file file, uint32_t id) {
   }
 
   /* handle an existing request */
+  msg = sftp_dequeue(sftp,id);
   while (msg == NULL) {
     if (file->nonblocking){
       if (ssh_channel_poll(sftp->channel, 0) == 0) {
