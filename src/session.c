@@ -685,7 +685,12 @@ int ssh_handle_packets_termination(ssh_session session,
         }
     } else if (timeout == SSH_TIMEOUT_DEFAULT) {
         if (ssh_is_blocking(session)) {
-            timeout = SSH_TIMEOUT_INFINITE;
+            if (session->opts.timeout<=0 && session->opts.timeout_usec) {
+              timeout = SSH_TIMEOUT_INFINITE;
+            } else {
+               timeout = ssh_make_milliseconds(session->opts.timeout,
+                                               session->opts.timeout_usec);
+            }
         } else {
             timeout = SSH_TIMEOUT_NONBLOCKING;
         }
@@ -703,7 +708,13 @@ int ssh_handle_packets_termination(ssh_session session,
             break;
         }
         if (ssh_timeout_elapsed(&ts,timeout)) {
-            ret = fct(user) ? SSH_OK : SSH_AGAIN;
+            if (ssh_is_blocking(session)) {
+              ret = SSH_ERROR;
+              session->session_state = SSH_SESSION_STATE_ERROR;
+              ssh_set_error(session, SSH_FATAL, "Connection timed out");
+            } else {
+              ret = fct(user) ? SSH_OK : SSH_AGAIN;
+            }
             break;
         }
 
