@@ -278,6 +278,7 @@ void ssh_free(ssh_session session) {
 #endif
   session->agent_state = NULL;
 
+  SAFE_FREE(session->remote_ip);
   SAFE_FREE(session->auth_auto_state);
   SAFE_FREE(session->serverbanner);
   SAFE_FREE(session->clientbanner);
@@ -317,6 +318,21 @@ const char* ssh_get_clientbanner(ssh_session session) {
     }
 
     return session->clientbanner;
+}
+
+/**
+ * @brief get remote ip
+ *
+ * @param[in] session   The SSH session
+ *
+ * @return Returns the remote host's IP as string or NULL.
+ */
+const char* ssh_get_remoteip(ssh_session session) {
+    if (session == NULL) {
+        return NULL;
+    }
+
+    return session->remote_ip;
 }
 
 /**

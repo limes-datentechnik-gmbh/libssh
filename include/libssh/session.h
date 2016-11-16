@@ -89,6 +89,8 @@ struct ssh_common_struct {
 struct ssh_session_struct {
     struct ssh_common_struct common;
     struct ssh_socket_struct *socket;
+    /* remote ip is set when connecting */
+    char *remote_ip;
     char *serverbanner;
     char *clientbanner;
     int protoversion;

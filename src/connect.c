@@ -228,6 +228,7 @@ socket_t ssh_connect_host(ssh_session session, const char *host,
     const char *bind_addr, int port, long timeout, long usec) {
   socket_t s = -1;
   int rc;
+  char* remote_ip;
   struct addrinfo *ai;
   struct addrinfo *itr;
 
@@ -235,6 +236,15 @@ socket_t ssh_connect_host(ssh_session session, const char *host,
   if (rc != 0) {
     ssh_set_error(session, SSH_FATAL,
         "Failed to resolve hostname %s (%s)", host, gai_strerror(rc));
+
+    return -1;
+  }
+
+  SAFE_FREE(session->remote_ip);
+  remote_ip = (char*)malloc(INET6_ADDRSTRLEN);
+  if (remote_ip == NULL) {
+    ssh_set_error(session, SSH_FATAL,
+        "Failed to allocate memory for the remote IP.");
 
     return -1;
   }
@@ -262,6 +272,8 @@ socket_t ssh_connect_host(ssh_session session, const char *host,
             gai_strerror(rc));
         freeaddrinfo(ai);
         close(s);
+        if (session->remote_ip != remote_ip)
+          free(remote_ip);
 
         return -1;
       }
@@ -285,11 +297,21 @@ socket_t ssh_connect_host(ssh_session session, const char *host,
       }
     }
 
+    // get string of the IPv4/6 address and store it in the session
+    if (getnameinfo(itr->ai_addr, itr->ai_addrlen, remote_ip, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST) == 0) {
+       session->remote_ip = remote_ip;
+    } else {
+      // there was an error during conversion, silently continue
+    }
+
+    // connect
     if (timeout || usec) {
       socket_t ret = ssh_connect_ai_timeout(session, host, port, itr,
           timeout, usec, s);
 
       freeaddrinfo(ai);
+      if (session->remote_ip != remote_ip)
+         free(remote_ip);
       return ret;
     }
 
@@ -303,6 +325,9 @@ socket_t ssh_connect_host(ssh_session session, const char *host,
       break;
     }
   }
+
+  if (session->remote_ip != remote_ip)
+    free(remote_ip);
 
   freeaddrinfo(ai);
 
@@ -322,6 +347,7 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
     const char *bind_addr, int port) {
   socket_t s = -1;
   int rc;
+  char* remote_ip;
   struct addrinfo *ai;
   struct addrinfo *itr;
 
@@ -329,6 +355,15 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
   if (rc != 0) {
     ssh_set_error(session, SSH_FATAL,
         "Failed to resolve hostname %s (%s)", host, gai_strerror(rc));
+
+    return -1;
+  }
+
+  SAFE_FREE(session->remote_ip);
+  remote_ip = (char*)malloc(INET6_ADDRSTRLEN);
+  if (remote_ip == NULL) {
+    ssh_set_error(session, SSH_FATAL,
+        "Failed to allocate memory for the remote IP.");
 
     return -1;
   }
@@ -387,6 +422,14 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
         continue;
     }
 
+    // get string of the IPv4/6 address and store it in the session
+    if (getnameinfo(itr->ai_addr, itr->ai_addrlen, remote_ip, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST) == 0) {
+       session->remote_ip = remote_ip;
+    } else {
+      // there was an error during conversion, silently continue
+    }
+
+    // connect
     errno = 0;
     rc = connect(s, itr->ai_addr, itr->ai_addrlen);
     if (rc == -1 && (errno != 0) && (errno != EINPROGRESS)) {
@@ -401,6 +444,8 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
   }
 
   freeaddrinfo(ai);
+  if (session->remote_ip != remote_ip)
+    free(remote_ip);
 
   return s;
 }
