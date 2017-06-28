@@ -41,7 +41,7 @@
 #include <sys/types.h>
 
 #ifdef _WIN32
-# if _MSC_VER >= 1400
+# ifdef HAVE_IO_H
 #  include <io.h>
 #  undef open
 #  define open _open
@@ -51,7 +51,7 @@
 #  define read _read
 #  undef unlink
 #  define unlink _unlink
-# endif /* _MSC_VER */
+# endif /* HAVE_IO_H */
 #endif
 
 #include "libssh/libssh.h"
@@ -91,7 +91,7 @@ enum ssh_keytypes_e pki_privatekey_type_from_string(const char *privkey) {
  */
 const char *ssh_pki_key_ecdsa_name(const ssh_key key)
 {
-#ifdef HAVE_OPENSSL_ECC /* FIXME Better ECC check needed */
+#ifdef HAVE_ECC /* FIXME Better ECC check needed */
     return pki_key_ecdsa_nid_to_name(key->ecdsa_nid);
 #else
     (void) key; /* unused */
@@ -390,7 +390,9 @@ void ssh_signature_free(ssh_signature sig)
 #endif
             break;
         case SSH_KEYTYPE_ECDSA:
-#if defined(HAVE_LIBCRYPTO) && defined(HAVE_OPENSSL_ECC)
+#ifdef HAVE_GCRYPT_ECC
+            gcry_sexp_release(sig->ecdsa_sig);
+#elif defined(HAVE_LIBCRYPTO) && defined(HAVE_OPENSSL_ECC)
             ECDSA_SIG_free(sig->ecdsa_sig);
 #endif
             break;
@@ -1056,7 +1058,7 @@ int ssh_pki_import_pubkey_file(const char *filename, ssh_key *pkey)
         return SSH_ERROR;
     }
 
-    file = fopen(filename, "r");
+    file = fopen(filename, "rb");
     if (file == NULL) {
         SSH_LOG(SSH_LOG_WARN, "Error opening %s: %s",
                     filename, strerror(errno));
@@ -1396,7 +1398,7 @@ int ssh_pki_export_pubkey_file(const ssh_key key,
         return SSH_ERROR;
     }
 
-    fp = fopen(filename, "w+");
+    fp = fopen(filename, "wb+");
     if (fp == NULL) {
         return SSH_ERROR;
     }

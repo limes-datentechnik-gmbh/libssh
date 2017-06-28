@@ -120,8 +120,13 @@ void ssh_cipher_clear(struct ssh_cipher_struct *cipher){
     SAFE_FREE(cipher->key);
   }
 #endif
-  if (cipher->cleanup != NULL){
-    cipher->cleanup(cipher);
+  if (cipher->ctx != NULL) {
+    if (cipher->cleanup != NULL) {
+      cipher->cleanup(cipher);
+    }
+#ifdef HAVE_LIBCRYPTO
+    EVP_CIPHER_CTX_free(cipher->ctx);
+#endif
   }
 }
 
@@ -161,7 +166,11 @@ void crypto_free(struct ssh_crypto_struct *crypto){
   SAFE_FREE(crypto->ecdh_client_pubkey);
   SAFE_FREE(crypto->ecdh_server_pubkey);
   if(crypto->ecdh_privkey != NULL){
+#ifdef HAVE_OPENSSL_ECC
     EC_KEY_free(crypto->ecdh_privkey);
+#elif defined HAVE_GCRYPT_ECC
+    gcry_sexp_release(crypto->ecdh_privkey);
+#endif
     crypto->ecdh_privkey = NULL;
   }
 #endif
@@ -451,11 +460,11 @@ int crypt_set_algorithms_server(ssh_session session){
 
     method = session->next_crypto->kex_methods[SSH_COMP_S_C];
     if(strcmp(method,"zlib") == 0){
-        SSH_LOG(SSH_LOG_PACKET, "enabling S->C compression\n");
+        SSH_LOG(SSH_LOG_PACKET, "enabling S->C compression");
         session->next_crypto->do_compress_out=1;
     }
     if(strcmp(method,"zlib@openssh.com") == 0){
-        SSH_LOG(SSH_LOG_PACKET,"enabling S->C delayed compression\n");
+        SSH_LOG(SSH_LOG_PACKET,"enabling S->C delayed compression");
 
         if (session->flags & SSH_SESSION_FLAG_AUTHENTICATED) {
             session->next_crypto->do_compress_out = 1;

@@ -76,7 +76,11 @@ enum ssh_cipher_e {
 struct ssh_crypto_struct {
     bignum e,f,x,k,y;
 #ifdef HAVE_ECDH
+#ifdef HAVE_OPENSSL_ECC
     EC_KEY *ecdh_privkey;
+#elif defined HAVE_GCRYPT_ECC
+    gcry_sexp_t ecdh_privkey;
+#endif
     ssh_string ecdh_client_pubkey;
     ssh_string ecdh_server_pubkey;
 #endif
@@ -126,7 +130,7 @@ struct ssh_cipher_struct {
     struct ssh_3des_key_schedule *des3_key;
     struct ssh_aes_key_schedule *aes_key;
     const EVP_CIPHER *cipher;
-    EVP_CIPHER_CTX ctx;
+    EVP_CIPHER_CTX *ctx;
 #endif
     unsigned int keysize; /* bytes of key used. != keylen */
     /* sets the new key for immediate use */

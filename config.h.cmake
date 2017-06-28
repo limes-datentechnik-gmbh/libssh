@@ -35,6 +35,12 @@
 /* Define to 1 if you have the <sys/time.h> header file. */
 #cmakedefine HAVE_SYS_TIME_H 1
 
+/* Define to 1 if you have the <sys/utime.h> header file. */
+#cmakedefine HAVE_SYS_UTIME_H 1
+
+/* Define to 1 if you have the <io.h> header file. */
+#cmakedefine HAVE_IO_H 1
+
 /* Define to 1 if you have the <termios.h> header file. */
 #cmakedefine HAVE_TERMIOS_H 1
 
@@ -81,6 +87,15 @@
 
 /* Define to 1 if you have the `EVP_aes128_cbc' function. */
 #cmakedefine HAVE_OPENSSL_EVP_AES_CBC 1
+
+/* Define to 1 if you have the `CRYPTO_THREADID_set_callback' function. */
+#cmakedefine HAVE_OPENSSL_CRYPTO_THREADID_SET_CALLBACK 1
+
+/* Define to 1 if you have the `CRYPTO_ctr128_encrypt' function. */
+#cmakedefine HAVE_OPENSSL_CRYPTO_CTR128_ENCRYPT 1
+
+/* Define to 1 if you have the `EVP_CIPHER_CTX_new' function. */
+#cmakedefine HAVE_OPENSSL_EVP_CIPHER_CTX_NEW 1
 
 /* Define to 1 if you have the `snprintf' function. */
 #cmakedefine HAVE_SNPRINTF 1

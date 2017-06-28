@@ -33,10 +33,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#ifdef HAVE_SYS_TIME_H
-#include <sys/time.h>
-#endif /* HAVE_SYS_TIME_H */
-
 #endif /* _WIN32 */
 
 #include <limits.h>
@@ -47,6 +43,10 @@
 #include <sys/types.h>
 #include <ctype.h>
 #include <time.h>
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#endif /* HAVE_SYS_TIME_H */
+
 
 #ifdef _WIN32
 
@@ -59,9 +59,9 @@
 #include <shlobj.h>
 #include <direct.h>
 
-#if _MSC_VER >= 1400
-# include <io.h>
-#endif /* _MSC_VER */
+#ifdef HAVE_IO_H
+#include <io.h>
+#endif /* HAVE_IO_H */
 
 #endif /* _WIN32 */
 
@@ -494,23 +494,6 @@ unsigned long strtoul(const char *nptr, char **endptr, int base) {
     return (acc);
 }
 #endif /* __EBCDIC__ */
-
-#ifndef HAVE_NTOHLL
-uint64_t ntohll(uint64_t a) {
-#ifdef WORDS_BIGENDIAN
-  return a;
-#else /* WORDS_BIGENDIAN */
-  return (((uint64_t)(a) << 56) | \
-         (((uint64_t)(a) << 40) & 0xff000000000000ULL) | \
-         (((uint64_t)(a) << 24) & 0xff0000000000ULL) | \
-         (((uint64_t)(a) << 8)  & 0xff00000000ULL) | \
-         (((uint64_t)(a) >> 8)  & 0xff000000ULL) | \
-         (((uint64_t)(a) >> 24) & 0xff0000ULL) | \
-         (((uint64_t)(a) >> 40) & 0xff00ULL) | \
-         ((uint64_t)(a)  >> 56));
-#endif /* WORDS_BIGENDIAN */
-}
-#endif /* HAVE_NTOHLL */
 
 char *ssh_lowercase(const char* str) {
   char *new, *p;
@@ -1086,7 +1069,7 @@ int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
 #pragma convert(pop)
 #endif
   if (openssh != NULL) {
-      int major, minor;
+      unsigned int major, minor;
 
       /*
        * The banner is typical:
@@ -1095,11 +1078,26 @@ int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
        */
       if (strlen(openssh) > 9) {
 #ifdef __EBCDIC__
+          // TODO change strtol_ascii to strtoul_ascii
           major = strtol_ascii(openssh + 8, (char **) NULL, 10);
           minor = strtol_ascii(openssh + 10, (char **) NULL, 10);
 #else
-          major = strtol(openssh + 8, (char **) NULL, 10);
+          major = strtoul(openssh + 8, (char **) NULL, 10);
+          if (major < 1 || major > 100) {
+              ssh_set_error(session,
+                            SSH_FATAL,
+                            "Invalid major version number: %s",
+                            banner);
+              return -1;
+          }
           minor = strtol(openssh + 10, (char **) NULL, 10);
+          if (minor > 100) {
+              ssh_set_error(session,
+                            SSH_FATAL,
+                            "Invalid minor version number: %s",
+                            banner);
+              return -1;
+          }
 #endif
           session->openssh = SSH_VERSION_INT(major, minor, 0);
           SSH_LOG(SSH_LOG_RARE,
@@ -1199,6 +1197,7 @@ int ssh_timeout_elapsed(struct ssh_timestamp *ts, int timeout) {
             fprintf(stderr, "ssh_timeout_elapsed called with -2. this needs to "
                             "be fixed. please set a breakpoint on %s:%d and "
                             "fix the caller\n", __FILE__, __LINE__);
+            return 0;
         case -1: /* -1 means infinite timeout */
             return 0;
         case 0: /* 0 means no timeout */

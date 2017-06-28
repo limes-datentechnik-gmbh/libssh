@@ -250,7 +250,10 @@ static void torture_knownhosts_other_auto(void **state) {
     ssh_free(session);
 
     /* connect again and check host key */
-    *state = session = ssh_new();
+    session = ssh_new();
+    assert_non_null(session);
+
+    s->ssh.session = session;
 
     rc = ssh_options_set(session, SSH_OPTIONS_HOST, TORTURE_SSH_SERVER);
     assert_int_equal(rc, SSH_OK);
@@ -264,6 +267,8 @@ static void torture_knownhosts_other_auto(void **state) {
     /* ssh-rsa is the default but libssh should try ssh-dss instead */
     rc = ssh_is_server_known(session);
     assert_int_equal(rc, SSH_SERVER_KNOWN_OK);
+
+    /* session will be freed by session_teardown() */
 }
 
 static void torture_knownhosts_conflict(void **state) {
@@ -307,7 +312,10 @@ static void torture_knownhosts_conflict(void **state) {
     ssh_free(session);
 
     /* connect again and check host key */
-    *state = session = ssh_new();
+    session = ssh_new();
+    assert_non_null(session);
+
+    s->ssh.session = session;
 
     ssh_options_set(session, SSH_OPTIONS_HOST, TORTURE_SSH_SERVER);
     ssh_options_set(session, SSH_OPTIONS_KNOWNHOSTS, known_hosts_file);
@@ -319,6 +327,8 @@ static void torture_knownhosts_conflict(void **state) {
 
     rc = ssh_is_server_known(session);
     assert_int_equal(rc, SSH_SERVER_KNOWN_OK);
+
+    /* session will be freed by session_teardown() */
 }
 
 static void torture_knownhosts_precheck(void **state) {

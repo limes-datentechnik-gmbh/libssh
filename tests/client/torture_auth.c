@@ -112,7 +112,7 @@ static int agent_setup(void **state)
     assert_non_null(pwd);
 
     snprintf(ssh_agent_sock,
-             sizeof(ssh_agent_cmd),
+             sizeof(ssh_agent_sock),
              "%s/agent.sock",
              s->socket_dir);
 
@@ -499,12 +499,6 @@ static void torture_auth_cert(void **state) {
     char bob_ssh_cert[1024];
     struct passwd *pwd;
     int rc;
-
-    privkey = ssh_key_new();
-    assert_true(privkey != NULL);
-
-    cert = ssh_key_new();
-    assert_true(cert != NULL);
 
     pwd = getpwnam("bob");
     assert_non_null(pwd);

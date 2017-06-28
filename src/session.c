@@ -31,6 +31,9 @@
 #include "libssh/crypto.h"
 #include "libssh/server.h"
 #include "libssh/socket.h"
+#ifdef WITH_SSH1
+#include "libssh/ssh1.h"
+#endif /* WITH_SSH1 */
 #include "libssh/ssh2.h"
 #include "libssh/agent.h"
 #include "libssh/packet.h"
@@ -255,6 +258,10 @@ void ssh_free(ssh_session session) {
           ssh_message_free(msg);
       }
       ssh_list_free(session->ssh_message_list);
+  }
+
+  if (session->kbdint != NULL) {
+    ssh_kbdint_free(session->kbdint);
   }
 
   if (session->packet_callbacks) {
@@ -871,13 +878,17 @@ void ssh_socket_exception_callback(int code, int errno_code, void *user){
  * @return              SSH_OK on success, SSH_ERROR otherwise.
  */
 int ssh_send_ignore (ssh_session session, const char *data) {
+#ifdef WITH_SSH1
+    const int type = session->version == 1 ? SSH_MSG_IGNORE : SSH2_MSG_IGNORE;
+#else /* WITH_SSH1 */
+    const int type = SSH2_MSG_IGNORE;
+#endif /* WITH_SSH1 */
     int rc;
 
     if (ssh_socket_is_open(session->socket)) {
-
         rc = ssh_buffer_pack(session->out_buffer,
                              "bs",
-                             SSH2_MSG_IGNORE,
+                             type,
                              data);
         if (rc != SSH_OK){
             ssh_set_error_oom(session);
@@ -909,12 +920,22 @@ int ssh_send_debug (ssh_session session, const char *message, int always_display
     int rc;
 
     if (ssh_socket_is_open(session->socket)) {
-        rc = ssh_buffer_pack(session->out_buffer,
-                             "bbsd",
-                             SSH2_MSG_DEBUG,
-                             always_display != 0 ? 1 : 0,
-                             message,
-                             0); /* empty language tag */
+#ifdef WITH_SSH1
+        if (session->version == 1) {
+            rc = ssh_buffer_pack(session->out_buffer,
+                                 "bs",
+                                 SSH_MSG_DEBUG,
+                                 message);
+        } else
+#endif /* WITH_SSH1 */
+        {
+            rc = ssh_buffer_pack(session->out_buffer,
+                                 "bbsd",
+                                 SSH2_MSG_DEBUG,
+                                 always_display != 0 ? 1 : 0,
+                                 message,
+                                 0); /* empty language tag */
+        }
         if (rc != SSH_OK) {
             ssh_set_error_oom(session);
             goto error;

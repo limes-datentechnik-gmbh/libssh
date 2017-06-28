@@ -26,6 +26,20 @@
 #include <stdlib.h>
 #define CHUNKSIZE 4096
 
+#ifdef _WIN32
+# ifdef HAVE_IO_H
+#  include <io.h>
+#  undef open
+#  define open _open
+#  undef close
+#  define close _close
+#  undef read
+#  define read _read
+#  undef unlink
+#  define unlink _unlink
+# endif /* HAVE_IO_H */
+#endif
+
 struct ssh_connector_struct {
     ssh_session session;
 

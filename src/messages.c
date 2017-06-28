@@ -170,7 +170,8 @@ static int ssh_execute_server_request(ssh_session session, ssh_message msg)
                 ssh_callbacks_iterate(channel->callbacks,
                                       ssh_channel_callbacks,
                                       channel_pty_request_function) {
-                    rc = ssh_callbacks_iterate_exec(session,
+                    rc = ssh_callbacks_iterate_exec(channel_pty_request_function,
+                                                    session,
                                                     channel,
                                                     msg->channel_request.TERM,
                                                     msg->channel_request.width,
@@ -189,7 +190,9 @@ static int ssh_execute_server_request(ssh_session session, ssh_message msg)
                 ssh_callbacks_iterate(channel->callbacks,
                                       ssh_channel_callbacks,
                                       channel_shell_request_function) {
-                    rc = ssh_callbacks_iterate_exec(session, channel);
+                    rc = ssh_callbacks_iterate_exec(channel_shell_request_function,
+                                                    session,
+                                                    channel);
                     if (rc == 0) {
                         ssh_message_channel_request_reply_success(msg);
                     } else {
@@ -202,7 +205,8 @@ static int ssh_execute_server_request(ssh_session session, ssh_message msg)
                 ssh_callbacks_iterate(channel->callbacks,
                                       ssh_channel_callbacks,
                                       channel_x11_req_function) {
-                    ssh_callbacks_iterate_exec(session,
+                    ssh_callbacks_iterate_exec(channel_x11_req_function,
+                                               session,
                                                channel,
                                                msg->channel_request.x11_single_connection,
                                                msg->channel_request.x11_auth_protocol,
@@ -216,7 +220,8 @@ static int ssh_execute_server_request(ssh_session session, ssh_message msg)
                 ssh_callbacks_iterate(channel->callbacks,
                                       ssh_channel_callbacks,
                                       channel_pty_window_change_function) {
-                    rc = ssh_callbacks_iterate_exec(session,
+                    rc = ssh_callbacks_iterate_exec(channel_pty_window_change_function,
+                                                    session,
                                                     channel,
                                                     msg->channel_request.width,
                                                     msg->channel_request.height,
@@ -229,7 +234,8 @@ static int ssh_execute_server_request(ssh_session session, ssh_message msg)
                 ssh_callbacks_iterate(channel->callbacks,
                                       ssh_channel_callbacks,
                                       channel_exec_request_function) {
-                    rc = ssh_callbacks_iterate_exec(session,
+                    rc = ssh_callbacks_iterate_exec(channel_exec_request_function,
+                                                    session,
                                                     channel,
                                                     msg->channel_request.command);
                     if (rc == 0) {
@@ -245,7 +251,8 @@ static int ssh_execute_server_request(ssh_session session, ssh_message msg)
                 ssh_callbacks_iterate(channel->callbacks,
                                       ssh_channel_callbacks,
                                       channel_env_request_function) {
-                    rc = ssh_callbacks_iterate_exec(session,
+                    rc = ssh_callbacks_iterate_exec(channel_env_request_function,
+                                                    session,
                                                     channel,
                                                     msg->channel_request.var_name,
                                                     msg->channel_request.var_value);
@@ -261,7 +268,8 @@ static int ssh_execute_server_request(ssh_session session, ssh_message msg)
                 ssh_callbacks_iterate(channel->callbacks,
                                       ssh_channel_callbacks,
                                       channel_subsystem_request_function) {
-                    rc = ssh_callbacks_iterate_exec(session,
+                    rc = ssh_callbacks_iterate_exec(channel_subsystem_request_function,
+                                                    session,
                                                     channel,
                                                     msg->channel_request.subsystem);
                     if (rc == 0) {
@@ -961,6 +969,15 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_info_response){
 
       goto error;
     }
+  } else if (session->kbdint->answers != NULL) {
+      uint32_t n;
+
+      for (n = 0; n < session->kbdint->nanswers; n++) {
+            BURN_STRING(session->kbdint->answers[n]);
+            SAFE_FREE(session->kbdint->answers[n]);
+      }
+      SAFE_FREE(session->kbdint->answers);
+      session->kbdint->nanswers = 0;
   }
 
   SSH_LOG(SSH_LOG_PACKET,"kbdint: %d answers",nanswers);
@@ -980,7 +997,8 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_info_response){
                 " mismatch: p=%u a=%u", session->kbdint->nprompts, nanswers);
   }
   session->kbdint->nanswers = nanswers;
-  session->kbdint->answers = malloc(nanswers * sizeof(char *));
+
+  session->kbdint->answers = calloc(nanswers, sizeof(char *));
   if (session->kbdint->answers == NULL) {
     session->kbdint->nanswers = 0;
     ssh_set_error_oom(session);
@@ -989,7 +1007,6 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_info_response){
 
     goto error;
   }
-  memset(session->kbdint->answers, 0, nanswers * sizeof(char *));
 
   for (i = 0; i < nanswers; i++) {
     tmp = ssh_buffer_get_ssh_string(packet);
@@ -1398,7 +1415,9 @@ SSH_PACKET_CALLBACK(ssh_packet_global_request){
                     msg->global_request.bind_port);
             session->common.callbacks->global_request_function(session, msg, session->common.callbacks->userdata);
         } else {
-            ssh_message_reply_default(msg);
+            SAFE_FREE(request);
+            ssh_message_queue(session, msg);
+            return rc;
         }
     } else if (strcmp(request, "cancel-tcpip-forward") == 0) {
         r = ssh_buffer_unpack(packet, "sd",
@@ -1417,7 +1436,9 @@ SSH_PACKET_CALLBACK(ssh_packet_global_request){
         if(ssh_callbacks_exists(session->common.callbacks, global_request_function)) {
             session->common.callbacks->global_request_function(session, msg, session->common.callbacks->userdata);
         } else {
-            ssh_message_reply_default(msg);
+            SAFE_FREE(request);
+            ssh_message_queue(session, msg);
+            return rc;
         }
     } else if(strcmp(request, "keepalive@openssh.com") == 0) {
         msg->global_request.type = SSH_GLOBAL_REQUEST_KEEPALIVE;
