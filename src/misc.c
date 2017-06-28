@@ -343,11 +343,11 @@ static inline int isdigit_ascii(char c) {
 }
 
 /*
- * Convert an ASCII string to a long integer.
+ * Convert an ASCII string to a long unsigned integer.
  *
  * Treats the string as ASCII, even on EBCDIC systems.
  */
-long strtol_ascii(const char *nptr, char **endptr, int base) {
+static unsigned long strtoul_ascii(const char *nptr, char **endptr, int base) {
     register const char *s = nptr;
     register unsigned long acc;
     register int c;
@@ -355,18 +355,13 @@ long strtol_ascii(const char *nptr, char **endptr, int base) {
     register int neg = 0, any, cutlim;
 
     /*
-     * Skip white space and pick up leading +/- sign if any.
+     * Skip white space.
      * If base is 0, allow 0x for hex and 0 for octal, else
      * assume decimal; if base is already 16, allow 0x.
      */
     do {
         c = *s++;
     } while (isspace_ascii(c));
-    if (c == 0x2D) { /* '-' */
-        neg = 1;
-        c = *s++;
-    } else if (c == 0x2B) /* '+' */
-        c = *s++;
     if ((base == 0 || base == 16) &&
         c == 0x30 && (*s == 0x78 || *s == 0x58)) { /* '0', 'x', 'X' */
         c = s[1];
@@ -398,7 +393,7 @@ long strtol_ascii(const char *nptr, char **endptr, int base) {
      * Set any if any `digits' consumed; make it negative to indicate
      * overflow.
      */
-    cutoff = neg ? -(unsigned long)LONG_MIN : LONG_MAX;
+    cutoff = ULONG_MAX;
     cutlim = cutoff % (unsigned long)base;
     cutoff /= (unsigned long)base;
     for (acc = 0, any = 0;; c = *s++) {
@@ -419,76 +414,9 @@ long strtol_ascii(const char *nptr, char **endptr, int base) {
         }
     }
     if (any < 0) {
-        acc = neg ? LONG_MIN : LONG_MAX;
-    // errno = ERANGE;
-    } else if (neg)
-        acc = -acc;
-    if (endptr != 0)
-        *endptr = (char *)(any ? s - 1 : nptr);
-    return (acc);
-}
-
-/*
- * Convert a string to an unsigned long integer.
- *
- * Ignores `locale' stuff.  Assumes that the upper and lower case
- * alphabets and digits are each contiguous.
- */
-unsigned long strtoul(const char *nptr, char **endptr, int base) {
-    register const char *s = nptr;
-    register unsigned long acc;
-    register int c;
-    register unsigned long cutoff;
-    register int neg = 0, any, cutlim;
-
-    /*
-     * See strtol for comments as to the logic used.
-     */
-    do {
-        c = *s++;
-    } while (isspace_ascii(c));
-    if (c == 0x2D) { /* '-' */
-        neg = 1;
-        c = *s++;
-    } else if (c == 0x2B) /* '+' */
-        c = *s++;
-    if ((base == 0 || base == 16) &&
-        c == 0x30 && (*s == 0x78 || *s == 0x58)) { /* '0', 'x', 'X' */
-        c = s[1];
-        s += 2;
-        base = 16;
-    } else if ((base == 0 || base == 2) &&
-        c == 0x30 && (*s == 0x62 || *s == 0x42)) { /* '0', 'b', 'B' */
-        c = s[1];
-        s += 2;
-        base = 2;
-    }
-    if (base == 0)
-        base = c == 0x30 ? 8 : 10; /* '0' */
-    cutoff = (unsigned long)ULONG_MAX / (unsigned long)base;
-    cutlim = (unsigned long)ULONG_MAX % (unsigned long)base;
-    for (acc = 0, any = 0;; c = *s++) {
-        if (isdigit_ascii(c))
-            c -= 0x30; /* '0' */
-        else if (isalpha_ascii(c))
-            c -= isupper_ascii(c) ? 0x41 - 10 : 0x61 - 10; /* 'A', 'a' */
-        else
-            break;
-        if (c >= base)
-            break;
-        if (any < 0 || acc > cutoff || acc == cutoff && c > cutlim)
-            any = -1;
-        else {
-            any = 1;
-            acc *= base;
-            acc += c;
-        }
-    }
-    if (any < 0) {
         acc = ULONG_MAX;
     // errno = ERANGE;
-    } else if (neg)
-        acc = -acc;
+    }
     if (endptr != 0)
         *endptr = (char *)(any ? s - 1 : nptr);
     return (acc);
@@ -1078,9 +1006,8 @@ int ssh_analyze_banner(ssh_session session, int server, int *ssh1, int *ssh2) {
        */
       if (strlen(openssh) > 9) {
 #ifdef __EBCDIC__
-          // TODO change strtol_ascii to strtoul_ascii
-          major = strtol_ascii(openssh + 8, (char **) NULL, 10);
-          minor = strtol_ascii(openssh + 10, (char **) NULL, 10);
+          major = strtoul_ascii(openssh + 8, (char **) NULL, 10);
+          minor = strtoul_ascii(openssh + 10, (char **) NULL, 10);
 #else
           major = strtoul(openssh + 8, (char **) NULL, 10);
           if (major < 1 || major > 100) {
