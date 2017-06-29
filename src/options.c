@@ -197,6 +197,7 @@ int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, s
             } else {
                 session->opts.utf_to_local_func = value;
             }
+            break;
         case SSH_CHARCONVERT_LOCAL_TO_UTF8:
             if (value == NULL) {
                 ssh_set_error_invalid(session);
@@ -204,6 +205,7 @@ int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, s
             } else {
                 session->opts.local_to_utf_func = value;
             }
+            break;
         default:
             ssh_set_error(session, SSH_REQUEST_DENIED, "Unknown character converter option %d", type);
             return -1;

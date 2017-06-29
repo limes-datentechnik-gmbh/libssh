@@ -606,7 +606,7 @@ char * ssh_dump_knownhost(ssh_session session) {
             ssh_key_free(key);
             SAFE_FREE(host);
             SAFE_FREE(b64_key);
-            return -1;
+            return NULL;
         }
         ssh_string_to_ebcdic(str, str, strlen(str));
         snprintf(buffer, len,

@@ -616,7 +616,7 @@ SSH_PACKET_CALLBACK(ssh_packet_service_request){
     goto error;
   }
 
-  service_c = ssh_string_utf8_to_local(session, (ssh_string_to_char(service));
+  service_c = ssh_string_utf8_to_local(session, (ssh_string_to_char(service)));
   if (service_c == NULL) {
     goto error;
   }
@@ -1018,7 +1018,7 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_info_response){
 
       goto error;
     }
-    session->kbdint->answers[i] = ssh_string_utf8_to_local(session, (ssh_string_to_char(tmp));
+    session->kbdint->answers[i] = ssh_string_utf8_to_local(session, (ssh_string_to_char(tmp)));
     ssh_string_free(tmp);
     if (session->kbdint->answers[i] == NULL) {
       ssh_set_error_oom(session);
@@ -1073,7 +1073,7 @@ SSH_PACKET_CALLBACK(ssh_packet_channel_open){
     ssh_set_error(session,SSH_FATAL, "Invalid state when receiving channel open request (must be authenticated)");
     goto error;
   }
-  
+
   if (strcmp(type_c,"session") == 0) {
     msg->channel_request_open.type = SSH_CHANNEL_SESSION;
     SAFE_FREE(type_c);
