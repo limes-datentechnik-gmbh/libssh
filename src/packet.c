@@ -48,6 +48,8 @@
 #include "libssh/auth.h"
 #include "libssh/gssapi.h"
 
+//#define DEBUG_PACKETS
+
 static ssh_packet_callback default_packet_handlers[]= {
   ssh_packet_disconnect_callback,          // SSH2_MSG_DISCONNECT                 1
   ssh_packet_ignore_callback,              // SSH2_MSG_IGNORE	                    2
@@ -327,6 +329,14 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
                 processed += current_macsize;
             }
 
+#ifdef WITH_PCAP
+            if(session->pcap_ctx){
+             ssh_pcap_context_write(session->pcap_ctx,SSH_PCAP_DIR_IN,
+                   ssh_buffer_get(session->in_buffer),ssh_buffer_get_len(session->in_buffer)
+                   ,ssh_buffer_get_len(session->in_buffer));
+            }
+#endif
+
             /* skip the size field which has been processed before */
             ssh_buffer_pass_bytes(session->in_buffer, sizeof(uint32_t));
 
@@ -377,7 +387,7 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
                     session->in_packet.type, len, padding, compsize, payloadsize);
 
 #ifdef DEBUG_PACKETS
-            hexa = ssh_get_hexa(buffer_get_rest(session->in_buffer), len>32?32:len);
+            hexa = ssh_get_hexa(ssh_buffer_get(session->in_buffer), len>32?32:len);
             fprintf(stderr,"Recv buffer (max 32 bytes): %s (%s)\n", hexa, ssh_packet_type_str(session->in_packet.type));
             ssh_string_free_char(hexa);
 #endif
@@ -605,9 +615,9 @@ static int packet_send2(ssh_session session) {
   uint8_t header[sizeof(padding) + sizeof(finallen)] = { 0 };
 
 #ifdef DEBUG_PACKETS
-  uint8_t packettype = ((uint8_t*)buffer_get_rest(session->out_buffer))[0];
+  uint8_t packettype = ((uint8_t*)ssh_buffer_get(session->out_buffer))[0];
   uint32_t dumplen = currentlen>32?32:currentlen;
-  char* hexa = ssh_get_hexa(buffer_get_rest(session->out_buffer), dumplen);
+  char* hexa = ssh_get_hexa(ssh_buffer_get(session->out_buffer), dumplen);
   fprintf(stderr,"Send buffer (max 32 bytes): %s (%s)\n", hexa, ssh_packet_type_str(packettype));
   ssh_string_free_char(hexa);
 #endif
