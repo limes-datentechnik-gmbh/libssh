@@ -604,6 +604,7 @@ char * ssh_dump_knownhost(ssh_session session) {
         if (str == NULL) {
             ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
             ssh_key_free(key);
+            SAFE_FREE(buffer);
             SAFE_FREE(host);
             SAFE_FREE(b64_key);
             return NULL;
