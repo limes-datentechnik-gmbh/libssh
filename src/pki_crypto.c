@@ -92,6 +92,9 @@ static int pki_key_ecdsa_to_nid(EC_KEY *k)
 
 const char *pki_key_ecdsa_nid_to_name(int nid)
 {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     switch (nid) {
         case NID_X9_62_prime256v1:
             return "ecdsa-sha2-nistp256";
@@ -102,12 +105,18 @@ const char *pki_key_ecdsa_nid_to_name(int nid)
         default:
             break;
     }
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
     return "unknown";
 }
 
 static const char *pki_key_ecdsa_nid_to_char(int nid)
 {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     switch (nid) {
         case NID_X9_62_prime256v1:
             return "nistp256";
@@ -118,12 +127,26 @@ static const char *pki_key_ecdsa_nid_to_char(int nid)
         default:
             break;
     }
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
     return "unknown";
 }
 
 int pki_key_ecdsa_nid_from_name(const char *name)
 {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+    if (strcmp(name, "nistp256") == 0) {
+        return NID_X9_62_prime256v1;
+    } else if (strcmp(name, "nistp384") == 0) {
+        return NID_secp384r1;
+    } else if (strcmp(name, "nistp521") == 0) {
+        return NID_secp521r1;
+    }
+#pragma convert(pop)
+#endif
     if (strcmp(name, "nistp256") == 0) {
         return NID_X9_62_prime256v1;
     } else if (strcmp(name, "nistp384") == 0) {
