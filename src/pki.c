@@ -1588,7 +1588,6 @@ int ssh_pki_signature_verify_blob(ssh_session session,
     }
 
 #ifdef __EBCDIC__
-#pragma convert(pop)
     str = strdup(key->type_c);
     if (str == NULL) {
         ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
