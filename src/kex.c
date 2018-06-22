@@ -77,17 +77,12 @@
 #define CURVE25519 ""
 #endif
 
-#ifdef __EBCDIC__
-#define HOSTKEYS "ssh-rsa,ssh-dss"
-#define ECDH ""
-#else
 #ifdef HAVE_ECDH
 #define ECDH "ecdh-sha2-nistp256,"
 #define HOSTKEYS "ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,ssh-rsa,ssh-dss"
 #else
 #define HOSTKEYS "ssh-ed25519,ssh-rsa,ssh-dss"
 #define ECDH ""
-#endif
 #endif
 
 #define KEY_EXCHANGE CURVE25519 ECDH "diffie-hellman-group14-sha1,diffie-hellman-group1-sha1"
@@ -498,12 +493,10 @@ void ssh_list_kex(struct ssh_kex_struct *kex) {
 static char *ssh_client_select_hostkeys(ssh_session session){
     char methods_buffer[128]={0};
     static const char *preferred_hostkeys[] = {
-#ifndef __EBCDIC__
         "ssh-ed25519",
         "ecdsa-sha2-nistp521",
         "ecdsa-sha2-nistp384",
         "ecdsa-sha2-nistp256",
-#endif
         "ssh-rsa",
         "ssh-dss",
         "ssh-rsa1",
