@@ -32,6 +32,7 @@
 #include "libssh/session.h"
 #include "libssh/buffer.h"
 #include "libssh/misc.h"
+#include "libssh/dh.h"
 #include "libssh/pki.h"
 #include "libssh/options.h"
 #include "libssh/knownhosts.h"
@@ -57,18 +58,6 @@
  *
  * @{
  */
-
-static int alldigits(const char *s) {
-  while (*s) {
-    if (isdigit(*s)) {
-      s++;
-    } else {
-      return 0;
-    }
-  }
-
-  return 1;
-}
 
 /**
  * @internal
@@ -102,7 +91,7 @@ static void tokens_free(char **tokens) {
  * @param[out] found_type A pointer to a string to be set with the found key
  *                        type.
  *
- * @returns             The found_type type of key (ie "dsa","ssh-rsa1"). Don't
+ * @returns             The found_type type of key (ie "dsa","ssh-rsa"). Don't
  *                      free that value. NULL if no match was found or the file
  *                      was not found.
  */
@@ -149,21 +138,9 @@ static char **ssh_get_knownhost_line(FILE **file, const char *filename,
     }
 
     *found_type = tokens[1];
-    if (tokens[3]) {
-      /* openssh rsa1 format has 4 tokens on the line. Recognize it
-         by the fact that everything is all digits */
-      if (tokens[4]) {
-        /* that's never valid */
-        tokens_free(tokens);
-        continue;
-      }
-      if (alldigits(tokens[1]) && alldigits(tokens[2]) && alldigits(tokens[3])) {
-        *found_type = "ssh-rsa1";
-      } else {
-        /* 3 tokens only, not four */
-        tokens_free(tokens);
-        continue;
-      }
+    if (tokens[3] || tokens[4]) {
+      tokens_free(tokens);
+      continue;
     }
 
     return tokens;
@@ -188,75 +165,14 @@ static char **ssh_get_knownhost_line(FILE **file, const char *filename,
  *                      on error.
  */
 static int check_public_key(ssh_session session, char **tokens) {
-  ssh_string pubkey = session->current_crypto->server_pubkey;
+  ssh_string pubkey_blob = NULL;
   ssh_buffer pubkey_buffer;
   char *pubkey_64;
+  int rc;
 
-  /* ok we found some public key in known hosts file. now un-base64it */
-  if (alldigits(tokens[1])) {
-    /* openssh rsa1 format */
-    bignum tmpbn;
-    ssh_string tmpstring;
-    unsigned int len;
-    int i;
-
-    pubkey_buffer = ssh_buffer_new();
-    if (pubkey_buffer == NULL) {
-      return -1;
-    }
-
-    tmpstring = ssh_string_from_char("ssh-rsa1");
-    if (tmpstring == NULL) {
-      ssh_buffer_free(pubkey_buffer);
-      return -1;
-    }
-
-    if (ssh_buffer_add_ssh_string(pubkey_buffer, tmpstring) < 0) {
-      ssh_buffer_free(pubkey_buffer);
-      ssh_string_free(tmpstring);
-      return -1;
-    }
-    ssh_string_free(tmpstring);
-
-    for (i = 2; i < 4; i++) { /* e, then n */
-      tmpbn = NULL;
-      bignum_dec2bn(tokens[i], &tmpbn);
-      if (tmpbn == NULL) {
-        ssh_buffer_free(pubkey_buffer);
-        return -1;
-      }
-      /* for some reason, ssh_make_bignum_string does not work
-         because of the padding which it does --kv */
-      /* tmpstring = ssh_make_bignum_string(tmpbn); */
-      /* do it manually instead */
-      len = bignum_num_bytes(tmpbn);
-      tmpstring = malloc(4 + len);
-      if (tmpstring == NULL) {
-        ssh_buffer_free(pubkey_buffer);
-        bignum_free(tmpbn);
-        return -1;
-      }
-      /* TODO: fix the hardcoding */
-      tmpstring->size = htonl(len);
-#ifdef HAVE_LIBGCRYPT
-      bignum_bn2bin(tmpbn, len, ssh_string_data(tmpstring));
-#elif defined HAVE_LIBCRYPTO
-      bignum_bn2bin(tmpbn, ssh_string_data(tmpstring));
-#endif
-      bignum_free(tmpbn);
-      if (ssh_buffer_add_ssh_string(pubkey_buffer, tmpstring) < 0) {
-        ssh_buffer_free(pubkey_buffer);
-        ssh_string_free(tmpstring);
-        bignum_free(tmpbn);
-        return -1;
-      }
-      ssh_string_free(tmpstring);
-    }
-  } else {
     /* ssh-dss or ssh-rsa */
     pubkey_64 = tokens[2];
     pubkey_buffer = base64_to_bin(pubkey_64);
-  }
 
   if (pubkey_buffer == NULL) {
     ssh_set_error(session, SSH_FATAL,
@@ -264,18 +180,27 @@ static int check_public_key(ssh_session session, char **tokens) {
     return -1;
   }
 
-  if (ssh_buffer_get_len(pubkey_buffer) != ssh_string_len(pubkey)) {
+  rc = ssh_dh_get_current_server_publickey_blob(session, &pubkey_blob);
+  if (rc != 0) {
+      ssh_buffer_free(pubkey_buffer);
+      return -1;
+  }
+
+  if (ssh_buffer_get_len(pubkey_buffer) != ssh_string_len(pubkey_blob)) {
+    ssh_string_free(pubkey_blob);
     ssh_buffer_free(pubkey_buffer);
     return 0;
   }
 
   /* now test that they are identical */
-  if (memcmp(ssh_buffer_get(pubkey_buffer), ssh_string_data(pubkey),
+  if (memcmp(ssh_buffer_get(pubkey_buffer), ssh_string_data(pubkey_blob),
         ssh_buffer_get_len(pubkey_buffer)) != 0) {
+    ssh_string_free(pubkey_blob);
     ssh_buffer_free(pubkey_buffer);
     return 0;
   }
 
+  ssh_string_free(pubkey_blob);
   ssh_buffer_free(pubkey_buffer);
   return 1;
 }
@@ -376,32 +301,10 @@ static int match_hashed_host(const char *host, const char *sourcehash)
  */
 
 /**
- * @brief Check if the server is known.
+ * @brief This function is depcrecated
  *
- * Checks the user's known host file for a previous connection to the
- * current server.
- *
- * @param[in]  session  The SSH session to use.
- *
- * @returns SSH_SERVER_KNOWN_OK:       The server is known and has not changed.\n
- *          SSH_SERVER_KNOWN_CHANGED:  The server key has changed. Either you
- *                                     are under attack or the administrator
- *                                     changed the key. You HAVE to warn the
- *                                     user about a possible attack.\n
- *          SSH_SERVER_FOUND_OTHER:    The server gave use a key of a type while
- *                                     we had an other type recorded. It is a
- *                                     possible attack.\n
- *          SSH_SERVER_NOT_KNOWN:      The server is unknown. User should
- *                                     confirm the MD5 is correct.\n
- *          SSH_SERVER_FILE_NOT_FOUND: The known host file does not exist. The
- *                                     host is thus unknown. File will be
- *                                     created if host key is accepted.\n
- *          SSH_SERVER_ERROR:          Some error happened.
- *
- * @see ssh_get_pubkey_hash()
- *
- * @bug There is no current way to remove or modify an entry into the known
- *      host table.
+ * @deprecated          Please use ssh_session_is_known_server()
+ * @see ssh_session_is_known_server()
  */
 int ssh_is_server_known(ssh_session session) {
   FILE *file = NULL;
@@ -410,6 +313,8 @@ int ssh_is_server_known(ssh_session session) {
   char *hostport;
   const char *type;
   int match;
+  int i=0;
+  char * files[3];
   int ret = SSH_SERVER_NOT_KNOWN;
 
   if (session->opts.knownhosts == NULL) {
@@ -444,14 +349,27 @@ int ssh_is_server_known(ssh_session session) {
     return SSH_SERVER_ERROR;
   }
 
+  /* set the list of known hosts */
+  i = 0;
+  if (session->opts.global_knownhosts != NULL){
+      files[i++]=session->opts.global_knownhosts;
+  }
+  files[i++] = session->opts.knownhosts;
+  files[i] = NULL;
+  i = 0;
+
   do {
     tokens = ssh_get_knownhost_line(&file,
-                                    session->opts.knownhosts,
+                                    files[i],
                                     &type);
 
-    /* End of file, return the current state */
+    /* End of file, return the current state or use next file */
     if (tokens == NULL) {
-      break;
+      ++i;
+      if(files[i] == NULL)
+          break;
+      else
+          continue;
     }
     match = match_hashed_host(host, tokens[0]);
     if (match == 0){
@@ -464,12 +382,21 @@ int ssh_is_server_known(ssh_session session) {
       match = match_hashed_host(hostport, tokens[0]);
     }
     if (match) {
+      ssh_key pubkey = ssh_dh_get_current_server_publickey(session);
+      const char *pubkey_type = NULL;
+
+      if (ssh_key_type(pubkey) == SSH_KEYTYPE_ECDSA) {
+          pubkey_type = ssh_pki_key_ecdsa_name(pubkey);
+      } else {
+        pubkey_type = ssh_key_type_to_char(ssh_key_type(pubkey));
+      }
+
       /* We got a match. Now check the key type */
-      if (strcmp(ssh_string_for_log(session->current_crypto->server_pubkey_type), type) != 0) {
+      if (strcmp(ssh_string_for_log(pubkey_type), type) != 0) {
           SSH_LOG(SSH_LOG_PACKET,
                   "ssh_is_server_known: server type [%s] doesn't match the "
                   "type [%s] in known_hosts file",
-                  ssh_string_for_log(session->current_crypto->server_pubkey_type),
+                  ssh_string_for_log(pubkey_type),
                   type);
         /* Different type. We don't override the known_changed error which is
          * more important */
@@ -524,8 +451,7 @@ int ssh_is_server_known(ssh_session session) {
  * @return              string on success, NULL on error.
  */
 char * ssh_dump_knownhost(ssh_session session) {
-    ssh_string pubkey_s;
-    ssh_key key;
+    ssh_key server_pubkey = NULL;
     char *host;
     char *hostport;
 #ifdef __EBCDIC__
@@ -560,74 +486,53 @@ char * ssh_dump_knownhost(ssh_session session) {
         return NULL;
     }
 
-    pubkey_s = session->current_crypto->server_pubkey;
-    if (pubkey_s == NULL){
+    server_pubkey = ssh_dh_get_current_server_publickey(session);
+    if (server_pubkey == NULL){
         ssh_set_error(session, SSH_FATAL, "No public key present");
-        SAFE_FREE(host);
-        return NULL;
-    }
-
-    rc = ssh_pki_import_pubkey_blob(pubkey_s, &key);
-    if (rc < 0) {
         SAFE_FREE(host);
         return NULL;
     }
 
     buffer = calloc (1, 4096);
     if (!buffer) {
-        ssh_key_free(key);
         SAFE_FREE(host);
         return NULL;
     }
 
-    if (strcmp(session->current_crypto->server_pubkey_type, "ssh-rsa1") == 0) {
-        /* openssh uses a different format for ssh-rsa1 keys.
-           Be compatible --kv */
-        rc = ssh_pki_export_pubkey_rsa1(key, host, buffer, len);
-        ssh_key_free(key);
+    rc = ssh_pki_export_pubkey_base64(server_pubkey, &b64_key);
+    if (rc < 0) {
+        SAFE_FREE(buffer);
         SAFE_FREE(host);
-        if (rc < 0) {
-            SAFE_FREE(buffer);
-            return NULL;
-        }
-    } else {
-        rc = ssh_pki_export_pubkey_base64(key, &b64_key);
-        if (rc < 0) {
-            ssh_key_free(key);
-            SAFE_FREE(buffer);
-            SAFE_FREE(host);
-            return NULL;
-        }
+        return NULL;
+    }
 
 #ifdef __EBCDIC__
-        str = strdup(key->type_c);
-        if (str == NULL) {
-            ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
-            ssh_key_free(key);
-            SAFE_FREE(buffer);
-            SAFE_FREE(host);
-            SAFE_FREE(b64_key);
-            return NULL;
-        }
-        ssh_string_to_ebcdic(str, str, strlen(str));
-        snprintf(buffer, len,
-                "%s %s %s\n",
-                host,
-                str,
-                b64_key);
-        free(str);
+    str = strdup(server_pubkey->type_c);
+    if (str == NULL) {
+        ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
+        ssh_key_free(server_pubkey);
+        SAFE_FREE(buffer);
+        SAFE_FREE(host);
+        SAFE_FREE(b64_key);
+        return NULL;
+    }
+    ssh_string_to_ebcdic(str, str, strlen(str));
+    snprintf(buffer, len,
+            "%s %s %s\n",
+            host,
+            str,
+            b64_key);
+    free(str);
 #else
         snprintf(buffer, len,
                 "%s %s %s\n",
                 host,
-                key->type_c,
+                server_pubkey->type_c,
                 b64_key);
 #endif
 
-        ssh_key_free(key);
-        SAFE_FREE(host);
-        SAFE_FREE(b64_key);
-    }
+    SAFE_FREE(host);
+    SAFE_FREE(b64_key);
 
     return buffer;
 }
@@ -698,100 +603,4 @@ int ssh_write_knownhost(ssh_session session) {
 
 #define KNOWNHOSTS_MAXTYPES 10
 
-/**
- * @internal
- * @brief Check which kind of host keys should be preferred for connection
- *        by reading the known_hosts file.
- *
- * @param[in]  session  The SSH session to use.
- *
- * @returns array of supported key types
- *			NULL on error
- */
-char **ssh_knownhosts_algorithms(ssh_session session) {
-  FILE *file = NULL;
-  char **tokens;
-  char *host;
-  char *hostport;
-  const char *type;
-  int match;
-  char **array;
-  int i=0, j;
-
-  if (session->opts.knownhosts == NULL) {
-    if (ssh_options_apply(session) < 0) {
-      ssh_set_error(session, SSH_REQUEST_DENIED,
-          "Can't find a known_hosts file");
-      return NULL;
-    }
-  }
-
-  if (session->opts.host == NULL) {
-    return NULL;
-  }
-
-  host = ssh_lowercase(session->opts.host);
-  hostport = ssh_hostport(host, session->opts.port > 0 ? session->opts.port : 22);
-  array = malloc(sizeof(char *) * KNOWNHOSTS_MAXTYPES);
-
-  if (host == NULL || hostport == NULL || array == NULL) {
-    ssh_set_error_oom(session);
-    SAFE_FREE(host);
-    SAFE_FREE(hostport);
-    SAFE_FREE(array);
-    return NULL;
-  }
-
-  do {
-    tokens = ssh_get_knownhost_line(&file,
-    		session->opts.knownhosts, &type);
-
-    /* End of file, return the current state */
-    if (tokens == NULL) {
-      break;
-    }
-    match = match_hashed_host(host, tokens[0]);
-    if (match == 0){
-    	match = match_hostname(hostport, tokens[0], strlen(tokens[0]));
-    }
-    if (match == 0) {
-      match = match_hostname(host, tokens[0], strlen(tokens[0]));
-    }
-    if (match == 0) {
-      match = match_hashed_host(hostport, tokens[0]);
-    }
-    if (match) {
-      /* We got a match. Now check the key type */
-    	SSH_LOG(SSH_LOG_DEBUG, "server %s:%d has %s in known_hosts",
-    							host, session->opts.port, type);
-    	/* don't copy more than once */
-    	for(j=0;j<i && match;++j){
-    		if(strcmp(array[j], type)==0)
-    			match=0;
-    	}
-    	if (match){
-    		array[i] = strdup(type);
-    		i++;
-    		if(i>= KNOWNHOSTS_MAXTYPES-1){
-    			tokens_free(tokens);
-    			break;
-    		}
-    	}
-    }
-    tokens_free(tokens);
-  } while (1);
-
-  array[i]=NULL;
-  SAFE_FREE(host);
-  SAFE_FREE(hostport);
-  if (file != NULL) {
-    fclose(file);
-  }
-
-  /* Return the current state at end of file */
-  return array;
-}
-
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

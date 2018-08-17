@@ -1,3 +1,5 @@
+#include "config.h"
+
 #define LIBSSH_STATIC
 
 #include "torture.h"
@@ -14,6 +16,8 @@ static void torture_ssh_list_new(void **state) {
     assert_true(xlist != NULL);
     assert_true(xlist->root == NULL);
     assert_true(xlist->end == NULL);
+
+    assert_int_equal(ssh_list_count(xlist), 0);
 
     ssh_list_free(xlist);
 }
@@ -44,6 +48,8 @@ static void torture_ssh_list_append(void **state) {
     assert_string_equal((const char *) xlist->root->next->next->data, "item3");
     assert_string_equal((const char *) xlist->end->data, "item3");
 
+    assert_int_equal(ssh_list_count(xlist), 3);
+
     ssh_list_free(xlist);
 }
 
@@ -72,6 +78,8 @@ static void torture_ssh_list_prepend(void **state) {
     assert_string_equal((const char *) xlist->root->next->data, "item1");
     assert_string_equal((const char *) xlist->root->next->next->data, "item2");
     assert_string_equal((const char *) xlist->end->data, "item2");
+
+    assert_int_equal(ssh_list_count(xlist), 3);
 
     ssh_list_free(xlist);
 }

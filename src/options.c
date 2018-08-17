@@ -154,8 +154,6 @@ int ssh_options_copy(ssh_session src, ssh_session *dest) {
     new->opts.port                 = src->opts.port;
     new->opts.timeout              = src->opts.timeout;
     new->opts.timeout_usec         = src->opts.timeout_usec;
-    new->opts.ssh2                 = src->opts.ssh2;
-    new->opts.ssh1                 = src->opts.ssh1;
     new->opts.compressionlevel     = src->opts.compressionlevel;
     new->common.log_verbosity      = src->common.log_verbosity;
     new->common.callbacks          = src->common.callbacks;
@@ -165,23 +163,24 @@ int ssh_options_copy(ssh_session src, ssh_session *dest) {
     return 0;
 }
 
-int ssh_options_set_algo(ssh_session session, int algo,
-    const char *list) {
-  if (!ssh_verify_existing_algo(algo, list)) {
-    ssh_set_error(session, SSH_REQUEST_DENIED,
-        "Setting method: no algorithm for method \"%s\" (%s)",
-        ssh_kex_get_description(algo), list);
-    return -1;
-  }
+int ssh_options_set_algo(ssh_session session,
+                         enum ssh_kex_types_e algo,
+                         const char *list)
+{
+    char *p = NULL;
 
-  SAFE_FREE(session->opts.wanted_methods[algo]);
-  session->opts.wanted_methods[algo] = strdup(list);
-  if (session->opts.wanted_methods[algo] == NULL) {
-    ssh_set_error_oom(session);
-    return -1;
-  }
+    p = ssh_keep_known_algos(algo, list);
+    if (p == NULL) {
+        ssh_set_error(session, SSH_REQUEST_DENIED,
+                "Setting method: no algorithm for method \"%s\" (%s)",
+                ssh_kex_get_description(algo), list);
+        return -1;
+    }
 
-  return 0;
+    SAFE_FREE(session->opts.wanted_methods[algo]);
+    session->opts.wanted_methods[algo] = p;
+
+    return 0;
 }
 
 int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, ssh_string_charconvert_func value) {
@@ -268,15 +267,27 @@ int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, s
  *                ~/.ssh/known_hosts.\n
  *                \n
  *                The known hosts file is used to certify remote hosts
- *                are genuine. It may include "%s" which will be
+ *                are genuine. It may include "%d" which will be
  *                replaced by the user home directory.
  *
- *              - SSH_OPTIONS_IDENTITY:
- *                Set the identity file name (const char *,format string).\n
+ *              - SSH_OPTIONS_GLOBAL_KNOWNHOSTS:
+ *                Set the global known hosts file name (const char *,format string).\n
+ *                \n
+ *                If the value is NULL, the directory is set to the
+ *                default global known hosts file, normally
+ *                /etc/ssh/ssh_known_hosts.\n
+ *                \n
+ *                The known hosts file is used to certify remote hosts
+ *                are genuine.
+ *
+ *              - SSH_OPTIONS_ADD_IDENTITY (or SSH_OPTIONS_IDENTITY):
+ *                Add a new identity file (const char *, format string) to
+ *                the identity list.\n
  *                \n
  *                By default identity, id_dsa and id_rsa are checked.\n
  *                \n
- *                The identity file used authenticate with public key.
+ *                The identity used to authenticate with public key will be
+ *                prepended to the list.
  *                It may include "%s" which will be replaced by the
  *                user home directory.
  *
@@ -288,12 +299,10 @@ int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, s
  *                        (long).
  *
  *              - SSH_OPTIONS_SSH1:
- *                Allow or deny the connection to SSH1 servers
- *                (int, 0 is false).
+ *                Deprecated
  *
  *              - SSH_OPTIONS_SSH2:
- *                Allow or deny the connection to SSH2 servers
- *                (int, 0 is false).
+ *                Unused
  *
  *              - SSH_OPTIONS_LOG_VERBOSITY:
  *                Set the session logging verbosity (int).\n
@@ -407,6 +416,32 @@ int ssh_options_charconv_set(ssh_session session, enum ssh_charconvert_e type, s
  *                Set it to specify that GSSAPI should delegate credentials
  *                to the server (int, 0 = false).
  *
+ *              - SSH_OPTIONS_PASSWORD_AUTH
+ *                Set it if password authentication should be used
+ *                in ssh_userauth_auto_pubkey(). (int, 0=false).
+ *                Currently without effect (ssh_userauth_auto_pubkey doesn't use
+ *                password authentication).
+ *
+ *              - SSH_OPTIONS_PUBKEY_AUTH
+ *                Set it if pubkey authentication should be used
+ *                in ssh_userauth_auto_pubkey(). (int, 0=false).
+ *
+ *              - SSH_OPTIONS_KBDINT_AUTH
+ *                Set it if keyboard-interactive authentication should be used
+ *                in ssh_userauth_auto_pubkey(). (int, 0=false).
+ *                Currently without effect (ssh_userauth_auto_pubkey doesn't use
+ *                keyboard-interactive authentication).
+ *
+ *              - SSH_OPTIONS_GSSAPI_AUTH
+ *                Set it if gssapi authentication should be used
+ *                in ssh_userauth_auto_pubkey(). (int, 0=false).
+ *                Currently without effect (ssh_userauth_auto_pubkey doesn't use
+ *                gssapi authentication).
+ *
+ *              - SSH_OPTIONS_NODELAY
+ *                Set it to disable Nagle's Algorithm (TCP_NODELAY) on the
+ *                session socket. (int, 0=false)
+ *
  * @param  value The value to set. This is a generic pointer and the
  *               datatype which is used should be set according to the
  *               type set.
@@ -418,6 +453,7 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
     const char *v;
     char *p, *q;
     long int i;
+    unsigned int u;
     int rc;
 
     if (session == NULL) {
@@ -607,6 +643,27 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                 }
             }
             break;
+        case SSH_OPTIONS_GLOBAL_KNOWNHOSTS:
+            v = value;
+            SAFE_FREE(session->opts.global_knownhosts);
+            if (v == NULL) {
+                session->opts.global_knownhosts =
+                    strdup("/etc/ssh/ssh_known_hosts");
+                if (session->opts.global_knownhosts == NULL) {
+                    ssh_set_error_oom(session);
+                    return -1;
+                }
+            } else if (v[0] == '\0') {
+                ssh_set_error_invalid(session);
+                return -1;
+            } else {
+                session->opts.global_knownhosts = strdup(v);
+                if (session->opts.global_knownhosts == NULL) {
+                    ssh_set_error_oom(session);
+                    return -1;
+                }
+            }
+            break;
         case SSH_OPTIONS_TIMEOUT:
             if (value == NULL) {
                 ssh_set_error_invalid(session);
@@ -636,32 +693,8 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
             }
             break;
         case SSH_OPTIONS_SSH1:
-            if (value == NULL) {
-                ssh_set_error_invalid(session);
-                return -1;
-            } else {
-                int *x = (int *) value;
-                if (*x < 0) {
-                    ssh_set_error_invalid(session);
-                    return -1;
-                }
-
-                session->opts.ssh1 = *x;
-            }
             break;
         case SSH_OPTIONS_SSH2:
-            if (value == NULL) {
-                ssh_set_error_invalid(session);
-                return -1;
-            } else {
-                int *x = (int *) value;
-                if (*x < 0) {
-                    ssh_set_error_invalid(session);
-                    return -1;
-                }
-
-                session->opts.ssh2 = *x & 0xffff;
-            }
             break;
         case SSH_OPTIONS_LOG_VERBOSITY:
             if (value == NULL) {
@@ -891,7 +924,39 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                 session->opts.gss_delegate_creds = (x & 0xff);
             }
             break;
-
+        case SSH_OPTIONS_PASSWORD_AUTH:
+        case SSH_OPTIONS_PUBKEY_AUTH:
+        case SSH_OPTIONS_KBDINT_AUTH:
+        case SSH_OPTIONS_GSSAPI_AUTH:
+            u = 0;
+            if (value == NULL) {
+                ssh_set_error_invalid(session);
+                return -1;
+            } else {
+                int x = *(int *)value;
+                u = type == SSH_OPTIONS_PASSWORD_AUTH ?
+                    SSH_OPT_FLAG_PASSWORD_AUTH:
+                    type == SSH_OPTIONS_PUBKEY_AUTH ?
+                        SSH_OPT_FLAG_PUBKEY_AUTH:
+                        type == SSH_OPTIONS_KBDINT_AUTH ?
+                            SSH_OPT_FLAG_KBDINT_AUTH:
+                            SSH_OPT_FLAG_GSSAPI_AUTH;
+                if (x != 0){
+                    session->opts.flags |= u;
+                } else {
+                    session->opts.flags &= ~u;
+                }
+            }
+            break;
+        case SSH_OPTIONS_NODELAY:
+            if (value == NULL) {
+                ssh_set_error_invalid(session);
+                return -1;
+            } else {
+                int *x = (int *) value;
+                session->opts.nodelay = (*x & 0xff) > 0 ? 1 : 0;
+            }
+            break;
         default:
             ssh_set_error(session, SSH_REQUEST_DENIED, "Unknown ssh option %d", type);
             return -1;
@@ -951,24 +1016,9 @@ int ssh_options_get_port(ssh_session session, unsigned int* port_target) {
  *                ~/.ssh/config file.
  *
  *              - SSH_OPTIONS_IDENTITY:
- *                Set the identity file name (const char *,format string).\n
+ *                Get the first identity file name (const char *).\n
  *                \n
- *                By default identity, id_dsa and id_rsa are checked.\n
- *                \n
- *                The identity file used authenticate with public key.
- *                It may include "%s" which will be replaced by the
- *                user home directory.
- *
- *              - SSH_OPTIONS_ADD_IDENTITY:
- *                Add a new identity file (const char *,format string) to
- *                the identity list.\n
- *                \n
- *                By default identity, id_dsa and id_rsa are checked.\n
- *                \n
- *                The identity used authenticate with public key will be
- *                prepended to the list.
- *                It may include "%s" which will be replaced by the
- *                user home directory.
+ *                By default identity, id_dsa and id_rsa are checked.
  *
  *              - SSH_OPTIONS_PROXYCOMMAND:
  *                Get the proxycommand necessary to log into the
@@ -1069,12 +1119,6 @@ int ssh_options_getopt(ssh_session session, int *argcptr, char **argv) {
   int compress = 0;
   int cont = 1;
   int current = 0;
-#ifdef WITH_SSH1
-  int ssh1 = 1;
-#else
-  int ssh1 = 0;
-#endif
-  int ssh2 = 1;
 #ifdef _MSC_VER
     /* Not supported with a Microsoft compiler */
     return -1;
@@ -1110,12 +1154,8 @@ int ssh_options_getopt(ssh_session session, int *argcptr, char **argv) {
         compress++;
         break;
       case '2':
-        ssh2 = 1;
-        ssh1 = 0;
         break;
       case '1':
-        ssh2 = 0;
-        ssh1 = 1;
         break;
       default:
         {
@@ -1216,9 +1256,6 @@ int ssh_options_getopt(ssh_session session, int *argcptr, char **argv) {
   if (port != NULL) {
     ssh_options_set(session, SSH_OPTIONS_PORT_STR, port);
   }
-
-  ssh_options_set(session, SSH_OPTIONS_SSH1, &ssh1);
-  ssh_options_set(session, SSH_OPTIONS_SSH2, &ssh2);
 
   if (!cont) {
     return SSH_ERROR;
@@ -1461,8 +1498,15 @@ int ssh_bind_options_set(ssh_bind sshbind, enum ssh_bind_options_e type,
           key_type = ssh_key_type(key);
           switch (key_type) {
           case SSH_KEYTYPE_DSS:
+#ifdef HAVE_DSA
               bind_key_loc = &sshbind->dsa;
               bind_key_path_loc = &sshbind->dsakey;
+#else
+              ssh_set_error(sshbind,
+                      SSH_FATAL,
+                      "DSS key used and libssh compiled "
+                      "without DSA support");
+#endif
               break;
           case SSH_KEYTYPE_ECDSA:
 #ifdef HAVE_ECC
@@ -1476,7 +1520,6 @@ int ssh_bind_options_set(ssh_bind sshbind, enum ssh_bind_options_e type,
 #endif
               break;
           case SSH_KEYTYPE_RSA:
-          case SSH_KEYTYPE_RSA1:
               bind_key_loc = &sshbind->rsa;
               bind_key_path_loc = &sshbind->rsakey;
               break;
@@ -1518,7 +1561,14 @@ int ssh_bind_options_set(ssh_bind sshbind, enum ssh_bind_options_e type,
             key_type = ssh_key_type(key);
             switch (key_type) {
                 case SSH_KEYTYPE_DSS:
+#ifdef HAVE_DSA
                     bind_key_loc = &sshbind->dsa;
+#else
+                    ssh_set_error(sshbind,
+                                  SSH_FATAL,
+                                  "DSA key used and libssh compiled "
+                                  "without DSA support");
+#endif
                     break;
                 case SSH_KEYTYPE_ECDSA:
 #ifdef HAVE_ECC
@@ -1531,7 +1581,6 @@ int ssh_bind_options_set(ssh_bind sshbind, enum ssh_bind_options_e type,
 #endif
                     break;
                 case SSH_KEYTYPE_RSA:
-                case SSH_KEYTYPE_RSA1:
                     bind_key_loc = &sshbind->rsa;
                     break;
                 case SSH_KEYTYPE_ED25519:
@@ -1657,5 +1706,3 @@ int ssh_bind_options_set(ssh_bind sshbind, enum ssh_bind_options_e type,
 #endif
 
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

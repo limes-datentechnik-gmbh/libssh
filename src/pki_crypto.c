@@ -25,6 +25,8 @@
 #ifndef _PKI_CRYPTO_H
 #define _PKI_CRYPTO_H
 
+#include "config.h"
+
 #include "libssh/priv.h"
 
 #include <openssl/pem.h>
@@ -474,11 +476,30 @@ int pki_key_generate_rsa(ssh_key key, int parameter){
 
 int pki_key_generate_dss(ssh_key key, int parameter){
     int rc;
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+    key->dsa = DSA_new();
+    if (key->dsa == NULL) {
+        return SSH_ERROR;
+    }
+    rc = DSA_generate_parameters_ex(key->dsa,
+                                    parameter,
+                                    NULL,  /* seed */
+                                    0,     /* seed_len */
+                                    NULL,  /* counter_ret */
+                                    NULL,  /* h_ret */
+                                    NULL); /* cb */
+    if (rc != 1) {
+        DSA_free(key->dsa);
+        key->dsa = NULL;
+        return SSH_ERROR;
+    }
+#else
     key->dsa = DSA_generate_parameters(parameter, NULL, 0, NULL, NULL,
             NULL, NULL);
     if(key->dsa == NULL){
         return SSH_ERROR;
     }
+#endif
     rc = DSA_generate_key(key->dsa);
     if (rc != 1){
         DSA_free(key->dsa);
@@ -639,11 +660,6 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
     BIO *mem;
     int rc;
 
-    /* needed for openssl initialization */
-    if (ssh_init() < 0) {
-        return NULL;
-    }
-
     mem = BIO_new(BIO_s_mem());
     if (mem == NULL) {
         return NULL;
@@ -664,7 +680,7 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
             } else {
                 rc = PEM_write_bio_DSAPrivateKey(mem,
                                                  key->dsa,
-                                                 NULL, /* cipher */
+                                                 EVP_aes_128_cbc(),
                                                  NULL, /* kstr */
                                                  0, /* klen */
                                                  NULL, /* auth_fn */
@@ -689,7 +705,7 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
             } else {
                 rc = PEM_write_bio_RSAPrivateKey(mem,
                                                  key->rsa,
-                                                 NULL, /* cipher */
+                                                 EVP_aes_128_cbc(),
                                                  NULL, /* kstr */
                                                  0, /* klen */
                                                  NULL, /* auth_fn */
@@ -699,8 +715,8 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
                 goto err;
             }
             break;
-        case SSH_KEYTYPE_ECDSA:
 #ifdef HAVE_ECC
+        case SSH_KEYTYPE_ECDSA:
             if (passphrase == NULL) {
                 struct pem_get_password_struct pgp = { auth_fn, auth_data };
 
@@ -714,7 +730,7 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
             } else {
                 rc = PEM_write_bio_ECPrivateKey(mem,
                                                 key->ecdsa,
-                                                NULL, /* cipher */
+                                                EVP_aes_128_cbc(),
                                                 NULL, /* kstr */
                                                 0, /* klen */
                                                 NULL, /* auth_fn */
@@ -732,6 +748,7 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
         case SSH_KEYTYPE_DSS_CERT01:
         case SSH_KEYTYPE_RSA_CERT01:
         case SSH_KEYTYPE_UNKNOWN:
+        default:
             BIO_free(mem);
             SSH_LOG(SSH_LOG_WARN, "Unkown or invalid private key type %d", key->type);
             return NULL;
@@ -768,11 +785,6 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
 #else
     void *ecdsa = NULL;
 #endif
-
-    /* needed for openssl initialization */
-    if (ssh_init() < 0) {
-        return NULL;
-    }
 
     type = pki_privatekey_type_from_string(b64_key);
     if (type == SSH_KEYTYPE_UNKNOWN) {
@@ -1181,37 +1193,6 @@ fail:
     return NULL;
 }
 
-int pki_export_pubkey_rsa1(const ssh_key key,
-                           const char *host,
-                           char *rsa1,
-                           size_t rsa1_len)
-{
-    char *e;
-    char *n;
-    int rsa_size = RSA_size(key->rsa);
-    const BIGNUM *be, *bn;
-
-    RSA_get0_key(key->rsa, &bn, &be, NULL);
-    e = bignum_bn2dec(be);
-    if (e == NULL) {
-        return SSH_ERROR;
-    }
-
-    n = bignum_bn2dec(bn);
-    if (n == NULL) {
-        OPENSSL_free(e);
-        return SSH_ERROR;
-    }
-
-    snprintf(rsa1, rsa1_len,
-             "%s %d %s %s\n",
-             host, rsa_size << 3, e, n);
-    OPENSSL_free(e);
-    OPENSSL_free(n);
-
-    return SSH_OK;
-}
-
 /**
  * @internal
  *
@@ -1435,7 +1416,7 @@ static ssh_signature pki_signature_from_rsa_blob(const ssh_key pubkey,
         blob_orig = (char *) ssh_string_data(sig_blob);
 
         /* front-pad the buffer with zeroes */
-        BURN_BUFFER(blob_padded_data, pad_len);
+        explicit_bzero(blob_padded_data, pad_len);
         /* fill the rest with the actual signature blob */
         memcpy(blob_padded_data + pad_len, blob_orig, len);
 

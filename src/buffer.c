@@ -21,9 +21,9 @@
  * MA 02111-1307, USA.
  */
 
+#include "config.h"
+
 #include <limits.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdarg.h>
 
 #ifndef _WIN32
@@ -107,10 +107,10 @@ void ssh_buffer_free(struct ssh_buffer_struct *buffer) {
 
   if (buffer->data) {
     /* burn the data */
-    BURN_BUFFER(buffer->data, buffer->allocated);
+    explicit_bzero(buffer->data, buffer->allocated);
     SAFE_FREE(buffer->data);
   }
-  BURN_BUFFER(buffer, sizeof(struct ssh_buffer_struct));
+  explicit_bzero(buffer, sizeof(struct ssh_buffer_struct));
   SAFE_FREE(buffer);
 }
 
@@ -127,38 +127,40 @@ void ssh_buffer_set_secure(ssh_buffer buffer){
 }
 
 static int realloc_buffer(struct ssh_buffer_struct *buffer, size_t needed) {
-  size_t smallest = 1;
-  char *new;
+    size_t smallest = 1;
+    char *new;
 
-  buffer_verify(buffer);
+    buffer_verify(buffer);
 
-  /* Find the smallest power of two which is greater or equal to needed */
-  while(smallest <= needed) {
-      if (smallest == 0) {
-          return -1;
-      }
-      smallest <<= 1;
-  }
-  needed = smallest;
-  if (buffer->secure){
-	  new = malloc(needed);
-	  if (new == NULL) {
-		  return -1;
-      }
-	  memcpy(new, buffer->data,buffer->used);
-	  BURN_BUFFER(buffer->data, buffer->used);
-	  SAFE_FREE(buffer->data);
-  } else {
-	  new = realloc(buffer->data, needed);
-	  if (new == NULL) {
-		  buffer->data = NULL;
-		  return -1;
-	  }
-  }
-  buffer->data = new;
-  buffer->allocated = needed;
-  buffer_verify(buffer);
-  return 0;
+    /* Find the smallest power of two which is greater or equal to needed */
+    while(smallest <= needed) {
+        if (smallest == 0) {
+            return -1;
+        }
+        smallest <<= 1;
+    }
+    needed = smallest;
+    if (buffer->secure){
+        new = malloc(needed);
+        if (new == NULL) {
+            return -1;
+        }
+        if (buffer->used > 0) {
+            memcpy(new, buffer->data,buffer->used);
+            explicit_bzero(buffer->data, buffer->used);
+            SAFE_FREE(buffer->data);
+        }
+    } else {
+        new = realloc(buffer->data, needed);
+        if (new == NULL) {
+            buffer->data = NULL;
+            return -1;
+        }
+    }
+    buffer->data = new;
+    buffer->allocated = needed;
+    buffer_verify(buffer);
+    return 0;
 }
 
 /** @internal
@@ -177,7 +179,7 @@ static void buffer_shift(ssh_buffer buffer){
 
   if (buffer->secure){
 	  void *ptr = buffer->data + buffer->used;
-	  BURN_BUFFER(ptr, burn_pos);
+	  explicit_bzero(ptr, burn_pos);
   }
 
   buffer_verify(buffer);
@@ -192,17 +194,21 @@ static void buffer_shift(ssh_buffer buffer){
  */
 int ssh_buffer_reinit(struct ssh_buffer_struct *buffer)
 {
-  buffer_verify(buffer);
-  BURN_BUFFER(buffer->data, buffer->used);
-  buffer->used = 0;
-  buffer->pos = 0;
-  if(buffer->allocated > 127) {
-    if (realloc_buffer(buffer, 127) < 0) {
-      return -1;
+    buffer_verify(buffer);
+    if (buffer->used > 0) {
+        explicit_bzero(buffer->data, buffer->used);
     }
-  }
-  buffer_verify(buffer);
-  return 0;
+    buffer->used = 0;
+    buffer->pos = 0;
+
+    if (buffer->allocated > 127) {
+        if (realloc_buffer(buffer, 127) < 0) {
+            return -1;
+        }
+    }
+    buffer_verify(buffer);
+
+    return 0;
 }
 
 /**
@@ -240,6 +246,72 @@ int ssh_buffer_add_data(struct ssh_buffer_struct *buffer, const void *data, uint
   buffer->used+=len;
   buffer_verify(buffer);
   return 0;
+}
+
+/**
+ * @brief Ensure the buffer has at least a certain preallocated size.
+ *
+ * @param[in]  buffer   The buffer to enlarge.
+ *
+ * @param[in]  len      The length to ensure as allocated.
+ *
+ * @return              0 on success, < 0 on error.
+ */
+int ssh_buffer_allocate_size(struct ssh_buffer_struct *buffer,
+                             uint32_t len)
+{
+    buffer_verify(buffer);
+
+    if (buffer->allocated < len) {
+        if (buffer->pos > 0) {
+            buffer_shift(buffer);
+        }
+        if (realloc_buffer(buffer, len) < 0) {
+            return -1;
+        }
+    }
+
+    buffer_verify(buffer);
+
+    return 0;
+}
+
+/**
+ * @internal
+ *
+ * @brief Allocate space for data at the tail of a buffer.
+ *
+ * @param[in]  buffer   The buffer to add the data.
+ *
+ * @param[in]  len      The length of the data to add.
+ *
+ * @return              Pointer on the allocated space
+ *                      NULL on error.
+ */
+void *ssh_buffer_allocate(struct ssh_buffer_struct *buffer, uint32_t len)
+{
+    void *ptr;
+    buffer_verify(buffer);
+
+    if (buffer->used + len < len) {
+        return NULL;
+    }
+
+    if (buffer->allocated < (buffer->used + len)) {
+        if (buffer->pos > 0) {
+            buffer_shift(buffer);
+        }
+
+        if (realloc_buffer(buffer, buffer->used + len) < 0) {
+            return NULL;
+        }
+    }
+
+    ptr = buffer->data + buffer->used;
+    buffer->used+=len;
+    buffer_verify(buffer);
+
+    return ptr;
 }
 
 /**
@@ -636,41 +708,6 @@ struct ssh_string_struct *ssh_buffer_get_ssh_string(struct ssh_buffer_struct *bu
     return NULL;
   }
 
-  return str;
-}
-
-/**
- * @internal
- *
- * @brief Get a mpint out of the buffer and adjusts the read pointer.
- *
- * @note This function is SSH-1 only.
- *
- * @param[in]  buffer   The buffer to read.
- *
- * @returns             The SSH String containing the mpint, NULL on error.
- */
-struct ssh_string_struct *ssh_buffer_get_mpint(struct ssh_buffer_struct *buffer) {
-  uint16_t bits;
-  uint32_t len;
-  struct ssh_string_struct *str = NULL;
-
-  if (ssh_buffer_get_data(buffer, &bits, sizeof(uint16_t)) != sizeof(uint16_t)) {
-    return NULL;
-  }
-  bits = ntohs(bits);
-  len = (bits + 7) / 8;
-  if (buffer->pos + len < len || buffer->pos + len > buffer->used) {
-    return NULL;
-  }
-  str = ssh_string_new(len);
-  if (str == NULL) {
-    return NULL;
-  }
-  if (ssh_buffer_get_data(buffer, ssh_string_data(str), len) != len) {
-    SAFE_FREE(str);
-    return NULL;
-  }
   return str;
 }
 
@@ -1078,5 +1115,3 @@ void ssh_buffer_dump(struct ssh_buffer_struct *buffer)
 }
 
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

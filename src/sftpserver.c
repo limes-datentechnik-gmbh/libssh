@@ -21,8 +21,8 @@
  * MA 02111-1307, USA.
  */
 
-#include <stdlib.h>
-#include <string.h>
+#include "config.h"
+
 #include <stdio.h>
 
 #ifndef _WIN32
@@ -457,11 +457,10 @@ ssh_string sftp_handle_alloc(sftp_session sftp, void *info) {
   int i;
 
   if (sftp->handles == NULL) {
-    sftp->handles = malloc(sizeof(void *) * SFTP_HANDLES);
+    sftp->handles = calloc(SFTP_HANDLES, sizeof(void *));
     if (sftp->handles == NULL) {
       return NULL;
     }
-    memset(sftp->handles, 0, sizeof(void *) * SFTP_HANDLES);
   }
 
   for (i = 0; i < SFTP_HANDLES; i++) {
@@ -516,5 +515,3 @@ void sftp_handle_remove(sftp_session sftp, void *handle) {
     }
   }
 }
-
-/* vim: set ts=2 sw=2 et cindent: */

@@ -1,3 +1,5 @@
+#include "config.h"
+
 #define LIBSSH_STATIC
 #include <libssh/priv.h>
 
@@ -10,7 +12,7 @@
 
 static void torture_channel_select(void **state)
 {
-    fd_set readfds;
+    fd_set readfds = {0};
     int fd;
     int rc;
     int i;

@@ -21,9 +21,9 @@
  * MA 02111-1307, USA.
  */
 
+#include "config.h"
+
 #include <errno.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
 #ifdef _WIN32
 #include <winsock2.h>
@@ -884,5 +884,3 @@ int ssh_socket_connect_proxycommand(ssh_socket s, const char *command){
 
 #endif /* _WIN32 */
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

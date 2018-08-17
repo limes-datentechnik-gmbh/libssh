@@ -1,6 +1,6 @@
 /*
  * curve25519.c - Curve25519 ECDH functions for key exchange
- * curve25519-sha256@libssh.org
+ * curve25519-sha256@libssh.org and curve25519-sha256
  *
  * This file is part of the SSH Library
  *
@@ -40,13 +40,14 @@
 #include "libssh/bignum.h"
 
 /** @internal
- * @brief Starts curve25519-sha256@libssh.org key exchange
+ * @brief Starts curve25519-sha256@libssh.org / curve25519-sha256 key exchange
  */
 int ssh_client_curve25519_init(ssh_session session){
   int rc;
+  int ok;
 
-  rc = ssh_get_random(session->next_crypto->curve25519_privkey, CURVE25519_PRIVKEY_SIZE, 1);
-  if (rc == 0){
+  ok = ssh_get_random(session->next_crypto->curve25519_privkey, CURVE25519_PRIVKEY_SIZE, 1);
+  if (!ok) {
 	  ssh_set_error(session, SSH_FATAL, "PRNG error");
 	  return SSH_ERROR;
   }
@@ -78,6 +79,12 @@ static int ssh_curve25519_build_k(ssh_session session) {
   if (session->next_crypto->k == NULL) {
     return SSH_ERROR;
   }
+#elif defined HAVE_LIBMBEDCRYPTO
+  session->next_crypto->k = bignum_new();
+
+  if (session->next_crypto->k == NULL) {
+    return SSH_ERROR;
+  }
 #endif
 
   if (session->server)
@@ -90,6 +97,8 @@ static int ssh_curve25519_build_k(ssh_session session) {
 #ifdef HAVE_LIBGCRYPT
   bignum_bin2bn(k, CURVE25519_PUBKEY_SIZE, &session->next_crypto->k);
 #elif defined HAVE_LIBCRYPTO
+  bignum_bin2bn(k, CURVE25519_PUBKEY_SIZE, session->next_crypto->k);
+#elif defined HAVE_LIBMBEDCRYPTO
   bignum_bin2bn(k, CURVE25519_PUBKEY_SIZE, session->next_crypto->k);
 #endif
 
@@ -110,17 +119,24 @@ static int ssh_curve25519_build_k(ssh_session session) {
  */
 int ssh_client_curve25519_reply(ssh_session session, ssh_buffer packet){
   ssh_string q_s_string = NULL;
-  ssh_string pubkey = NULL;
+  ssh_string pubkey_blob = NULL;
   ssh_string signature = NULL;
   int rc;
-  pubkey = ssh_buffer_get_ssh_string(packet);
-  if (pubkey == NULL){
+
+  pubkey_blob = ssh_buffer_get_ssh_string(packet);
+  if (pubkey_blob == NULL) {
     ssh_set_error(session,SSH_FATAL, "No public key in packet");
     goto error;
   }
-  /* this is the server host key */
-  session->next_crypto->server_pubkey = pubkey;
-  pubkey = NULL;
+
+  rc = ssh_dh_import_next_pubkey_blob(session, pubkey_blob);
+  ssh_string_free(pubkey_blob);
+  if (rc != 0) {
+      ssh_set_error(session,
+                    SSH_FATAL,
+                    "Failed to import next public key");
+      goto error;
+  }
 
   q_s_string = ssh_buffer_get_ssh_string(packet);
   if (q_s_string == NULL) {
@@ -170,10 +186,12 @@ int ssh_server_curve25519_init(ssh_session session, ssh_buffer packet){
     /* ECDH keys */
     ssh_string q_c_string;
     ssh_string q_s_string;
+    ssh_string server_pubkey_blob = NULL;
 
     /* SSH host keys (rsa,dsa,ecdsa) */
     ssh_key privkey;
     ssh_string sig_blob = NULL;
+    int ok;
     int rc;
 
     /* Extract the client pubkey from the init packet */
@@ -194,8 +212,8 @@ int ssh_server_curve25519_init(ssh_session session, ssh_buffer packet){
     ssh_string_free(q_c_string);
     /* Build server's keypair */
 
-    rc = ssh_get_random(session->next_crypto->curve25519_privkey, CURVE25519_PRIVKEY_SIZE, 1);
-    if (rc == 0){
+    ok = ssh_get_random(session->next_crypto->curve25519_privkey, CURVE25519_PRIVKEY_SIZE, 1);
+    if (!ok) {
         ssh_set_error(session, SSH_FATAL, "PRNG error");
         return SSH_ERROR;
     }
@@ -228,9 +246,16 @@ int ssh_server_curve25519_init(ssh_session session, ssh_buffer packet){
         goto error;
     }
 
+    rc = ssh_dh_get_next_server_publickey_blob(session, &server_pubkey_blob);
+    if (rc != 0) {
+        ssh_set_error(session, SSH_FATAL, "Could not export server public key");
+        goto error;
+    }
+
     /* add host's public key */
     rc = ssh_buffer_add_ssh_string(session->out_buffer,
-                               session->next_crypto->server_pubkey);
+                                   server_pubkey_blob);
+    ssh_string_free(server_pubkey_blob);
     if (rc < 0) {
         ssh_set_error_oom(session);
         goto error;

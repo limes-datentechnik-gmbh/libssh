@@ -19,6 +19,8 @@
  * MA 02111-1307, USA.
  */
 
+#include "config.h"
+
 #include "libssh/priv.h"
 #include "libssh/poll.h"
 #include "libssh/callbacks.h"
@@ -104,6 +106,15 @@ ssh_connector ssh_connector_new(ssh_session session)
 
 void ssh_connector_free (ssh_connector connector)
 {
+    if (connector->in_channel != NULL) {
+        ssh_remove_channel_callbacks(connector->in_channel,
+                                     &connector->in_channel_cb);
+    }
+    if (connector->out_channel != NULL) {
+        ssh_remove_channel_callbacks(connector->out_channel,
+                                     &connector->out_channel_cb);
+    }
+
     if (connector->event != NULL){
         ssh_connector_remove_event(connector);
     }
@@ -116,15 +127,6 @@ void ssh_connector_free (ssh_connector connector)
     if (connector->out_poll != NULL) {
         ssh_poll_free(connector->out_poll);
         connector->out_poll = NULL;
-    }
-
-    if (connector->in_channel != NULL) {
-        ssh_remove_channel_callbacks(connector->in_channel,
-                                     &connector->in_channel_cb);
-    }
-    if (connector->out_channel != NULL) {
-        ssh_remove_channel_callbacks(connector->out_channel,
-                                     &connector->out_channel_cb);
     }
 
     free(connector);
@@ -368,9 +370,10 @@ static int ssh_connector_fd_cb(ssh_poll_handle p,
 
     if (revents & POLLERR) {
         ssh_connector_except(connector, fd);
-    } else if((revents & POLLIN) && fd == connector->in_fd) {
+    } else if((revents & (POLLIN|POLLHUP)) && fd == connector->in_fd) {
         ssh_connector_fd_in_cb(connector);
-    } else if((revents & POLLOUT) && fd == connector->out_fd) {
+    } else if(((revents & POLLOUT) || (revents & POLLHUP)) &&
+              fd == connector->out_fd) {
         ssh_connector_fd_out_cb(connector);
     }
     ssh_connector_reset_pollevents(connector);

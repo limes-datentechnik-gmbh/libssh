@@ -36,6 +36,20 @@
 #define NISTP521 NID_secp521r1
 
 /** @internal
+ * @brief Map the given key exchange enum value to its curve name.
+ */
+static int ecdh_kex_type_to_curve(enum ssh_key_exchange_e kex_type) {
+    if (kex_type == SSH_KEX_ECDH_SHA2_NISTP256) {
+        return NISTP256;
+    } else if (kex_type == SSH_KEX_ECDH_SHA2_NISTP384) {
+        return NISTP384;
+    } else if (kex_type == SSH_KEX_ECDH_SHA2_NISTP521) {
+        return NISTP521;
+    }
+    return SSH_ERROR;
+}
+
+/** @internal
  * @brief Starts ecdh-sha2-nistp256 key exchange
  */
 int ssh_client_ecdh_init(ssh_session session){
@@ -43,6 +57,7 @@ int ssh_client_ecdh_init(ssh_session session){
   const EC_GROUP *group;
   const EC_POINT *pubkey;
   ssh_string client_pubkey;
+  int curve;
   int len;
   int rc;
   bignum_CTX ctx = BN_CTX_new();
@@ -53,7 +68,13 @@ int ssh_client_ecdh_init(ssh_session session){
       return SSH_ERROR;
   }
 
-  key = EC_KEY_new_by_curve_name(NISTP256);
+  curve = ecdh_kex_type_to_curve(session->next_crypto->kex_type);
+  if (curve == SSH_ERROR) {
+      BN_CTX_free(ctx);
+      return SSH_ERROR;
+  }
+
+  key = EC_KEY_new_by_curve_name(curve);
   if (key == NULL) {
       BN_CTX_free(ctx);
       return SSH_ERROR;
@@ -185,6 +206,8 @@ int ssh_server_ecdh_init(ssh_session session, ssh_buffer packet){
     /* SSH host keys (rsa,dsa,ecdsa) */
     ssh_key privkey;
     ssh_string sig_blob = NULL;
+    ssh_string pubkey_blob = NULL;
+    int curve;
     int len;
     int rc;
 
@@ -199,7 +222,14 @@ int ssh_server_ecdh_init(ssh_session session, ssh_buffer packet){
     /* Build server's keypair */
 
     ctx = BN_CTX_new();
-    ecdh_key = EC_KEY_new_by_curve_name(NISTP256);
+
+    curve = ecdh_kex_type_to_curve(session->next_crypto->kex_type);
+    if (curve == SSH_ERROR) {
+        BN_CTX_free(ctx);
+        return SSH_ERROR;
+    }
+
+    ecdh_key = EC_KEY_new_by_curve_name(curve);
     if (ecdh_key == NULL) {
         ssh_set_error_oom(session);
         BN_CTX_free(ctx);
@@ -260,14 +290,22 @@ int ssh_server_ecdh_init(ssh_session session, ssh_buffer packet){
         return SSH_ERROR;
     }
 
+    rc = ssh_dh_get_next_server_publickey_blob(session, &pubkey_blob);
+    if (rc != SSH_OK) {
+        ssh_set_error(session, SSH_FATAL, "Could not export server public key");
+        ssh_string_free(sig_blob);
+        return SSH_ERROR;
+    }
+
     rc = ssh_buffer_pack(session->out_buffer,
                          "bSSS",
                          SSH2_MSG_KEXDH_REPLY,
-                         session->next_crypto->server_pubkey, /* host's pubkey */
+                         pubkey_blob, /* host's pubkey */
                          q_s_string, /* ecdh public key */
                          sig_blob); /* signature blob */
 
     ssh_string_free(sig_blob);
+    ssh_string_free(pubkey_blob);
 
     if (rc != SSH_OK) {
         ssh_set_error_oom(session);

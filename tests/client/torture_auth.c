@@ -19,6 +19,8 @@
  * MA 02111-1307, USA.
  */
 
+#include "config.h"
+
 #define LIBSSH_STATIC
 
 #include "torture.h"
@@ -360,9 +362,7 @@ static void torture_auth_kbdint_nonblocking(void **state) {
     } while (rc == SSH_AUTH_AGAIN);
     assert_int_equal(rc, SSH_AUTH_INFO);
     assert_int_equal(ssh_userauth_kbdint_getnprompts(session), 1);
-    do {
-        rc = ssh_userauth_kbdint_setanswer(session, 0, TORTURE_SSH_USER_BOB_PASSWORD);
-    } while (rc == SSH_AUTH_AGAIN);
+    rc = ssh_userauth_kbdint_setanswer(session, 0, TORTURE_SSH_USER_BOB_PASSWORD);
     assert_false(rc < 0);
 
     do {
@@ -496,7 +496,7 @@ static void torture_auth_cert(void **state) {
     ssh_key privkey = NULL;
     ssh_key cert = NULL;
     char bob_ssh_key[1024];
-    char bob_ssh_cert[1024];
+    char bob_ssh_cert[2048];
     struct passwd *pwd;
     int rc;
 

@@ -554,7 +554,8 @@ void ssh_message_free(ssh_message msg){
     case SSH_REQUEST_AUTH:
       SAFE_FREE(msg->auth_request.username);
       if (msg->auth_request.password) {
-        BURN_STRING(msg->auth_request.password);
+        explicit_bzero(msg->auth_request.password,
+                       strlen(msg->auth_request.password));
         SAFE_FREE(msg->auth_request.password);
       }
       ssh_key_free(msg->auth_request.pubkey);
@@ -973,7 +974,8 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_info_response){
       uint32_t n;
 
       for (n = 0; n < session->kbdint->nanswers; n++) {
-            BURN_STRING(session->kbdint->answers[n]);
+            explicit_bzero(session->kbdint->answers[n],
+                           strlen(session->kbdint->answers[n]));
             SAFE_FREE(session->kbdint->answers[n]);
       }
       SAFE_FREE(session->kbdint->answers);
@@ -1161,6 +1163,7 @@ int ssh_message_channel_request_open_reply_accept_channel(ssh_message msg, ssh_c
     chan->remote_maxpacket = msg->channel_request_open.packet_size;
     chan->remote_window = msg->channel_request_open.window;
     chan->state = SSH_CHANNEL_STATE_OPEN;
+    chan->flags &= ~SSH_CHANNEL_FLAG_NOT_BOUND;
 
     rc = ssh_buffer_pack(session->out_buffer,
                          "bdddd",
@@ -1467,5 +1470,3 @@ error:
 #endif /* WITH_SERVER */
 
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

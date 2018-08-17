@@ -138,9 +138,19 @@ void ssh_key_clean (ssh_key key){
 #ifdef HAVE_OPENSSL_ECC
     if(key->ecdsa) EC_KEY_free(key->ecdsa);
 #endif /* HAVE_OPENSSL_ECC */
+#elif defined HAVE_LIBMBEDCRYPTO
+    if (key->rsa != NULL) {
+        mbedtls_pk_free(key->rsa);
+        SAFE_FREE(key->rsa);
+    }
+
+    if (key->ecdsa != NULL) {
+        mbedtls_ecdsa_free(key->ecdsa);
+        SAFE_FREE(key->ecdsa);
+    }
 #endif
     if (key->ed25519_privkey != NULL){
-        BURN_BUFFER(key->ed25519_privkey, sizeof(ed25519_privkey));
+        explicit_bzero(key->ed25519_privkey, sizeof(ed25519_privkey));
         SAFE_FREE(key->ed25519_privkey);
     }
     SAFE_FREE(key->ed25519_pubkey);
@@ -171,7 +181,9 @@ void ssh_key_free (ssh_key key){
 /**
  * @brief returns the type of a ssh key
  * @param[in] key the ssh_key handle
- * @returns one of SSH_KEYTYPE_RSA,SSH_KEYTYPE_DSS,SSH_KEYTYPE_RSA1
+ * @returns one of SSH_KEYTYPE_RSA, SSH_KEYTYPE_DSS,
+ *          SSH_KEYTYPE_ECDSA, SSH_KEYTYPE_ED25519,
+ *          SSH_KEYTYPE_DSS_CERT01, SSH_KEYTYPE_RSA_CERT01
  * @returns SSH_KEYTYPE_UNKNOWN if the type is unknown
  */
 enum ssh_keytypes_e ssh_key_type(const ssh_key key){
@@ -197,8 +209,6 @@ const char *ssh_key_type_to_char(enum ssh_keytypes_e type) {
       return "ssh-dss";
     case SSH_KEYTYPE_RSA:
       return "ssh-rsa";
-    case SSH_KEYTYPE_RSA1:
-      return "ssh-rsa1";
     case SSH_KEYTYPE_ECDSA:
       return "ssh-ecdsa";
     case SSH_KEYTYPE_ED25519:
@@ -207,6 +217,7 @@ const char *ssh_key_type_to_char(enum ssh_keytypes_e type) {
       return "ssh-dss-cert-v01@openssh.com";
     case SSH_KEYTYPE_RSA_CERT01:
       return "ssh-rsa-cert-v01@openssh.com";
+    case SSH_KEYTYPE_RSA1:
     case SSH_KEYTYPE_UNKNOWN:
       return NULL;
   }
@@ -233,14 +244,10 @@ enum ssh_keytypes_e ssh_key_type_from_name(const char *name) {
 #ifdef __EBCDIC__
 #pragma convert("ISO8859-1")
     // On EBCDIC, compare in Latin-1 first
-    if (strcmp(name, "rsa1") == 0) {
-        return SSH_KEYTYPE_RSA1;
-    } else if (strcmp(name, "rsa") == 0) {
+    if (strcmp(name, "rsa") == 0) {
         return SSH_KEYTYPE_RSA;
     } else if (strcmp(name, "dsa") == 0) {
         return SSH_KEYTYPE_DSS;
-    } else if (strcmp(name, "ssh-rsa1") == 0) {
-        return SSH_KEYTYPE_RSA1;
     } else if (strcmp(name, "ssh-rsa") == 0) {
         return SSH_KEYTYPE_RSA;
     } else if (strcmp(name, "ssh-dss") == 0) {
@@ -253,18 +260,18 @@ enum ssh_keytypes_e ssh_key_type_from_name(const char *name) {
         return SSH_KEYTYPE_ECDSA;
     } else if (strcmp(name, "ssh-ed25519") == 0){
         return SSH_KEYTYPE_ED25519;
+    } else if (strcmp(name, "ssh-dss-cert-v01@openssh.com") == 0) {
+        return SSH_KEYTYPE_DSS_CERT01;
+    } else if (strcmp(name, "ssh-rsa-cert-v01@openssh.com") == 0) {
+        return SSH_KEYTYPE_RSA_CERT01;
     }
 #pragma convert(pop)
 #endif
 
-    if (strcmp(name, "rsa1") == 0) {
-        return SSH_KEYTYPE_RSA1;
-    } else if (strcmp(name, "rsa") == 0) {
+    if (strcmp(name, "rsa") == 0) {
         return SSH_KEYTYPE_RSA;
     } else if (strcmp(name, "dsa") == 0) {
         return SSH_KEYTYPE_DSS;
-    } else if (strcmp(name, "ssh-rsa1") == 0) {
-        return SSH_KEYTYPE_RSA1;
     } else if (strcmp(name, "ssh-rsa") == 0) {
         return SSH_KEYTYPE_RSA;
     } else if (strcmp(name, "ssh-dss") == 0) {
@@ -382,10 +389,11 @@ void ssh_signature_free(ssh_signature sig)
 #endif
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
 #ifdef HAVE_LIBGCRYPT
             gcry_sexp_release(sig->rsa_sig);
 #elif defined HAVE_LIBCRYPTO
+            SAFE_FREE(sig->rsa_sig);
+#elif defined HAVE_LIBMBEDCRYPTO
             SAFE_FREE(sig->rsa_sig);
 #endif
             break;
@@ -394,6 +402,9 @@ void ssh_signature_free(ssh_signature sig)
             gcry_sexp_release(sig->ecdsa_sig);
 #elif defined(HAVE_LIBCRYPTO) && defined(HAVE_OPENSSL_ECC)
             ECDSA_SIG_free(sig->ecdsa_sig);
+#elif defined HAVE_LIBMBEDCRYPTO
+            bignum_safe_free(sig->ecdsa_sig.r);
+            bignum_safe_free(sig->ecdsa_sig.s);
 #endif
             break;
         case SSH_KEYTYPE_ED25519:
@@ -401,6 +412,7 @@ void ssh_signature_free(ssh_signature sig)
             break;
         case SSH_KEYTYPE_DSS_CERT01:
         case SSH_KEYTYPE_RSA_CERT01:
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
             break;
     }
@@ -758,7 +770,6 @@ static int pki_import_pubkey_buffer(ssh_buffer buffer,
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             {
                 ssh_string e;
                 ssh_string n;
@@ -789,8 +800,8 @@ static int pki_import_pubkey_buffer(ssh_buffer buffer,
                 }
             }
             break;
-        case SSH_KEYTYPE_ECDSA:
 #ifdef HAVE_ECC
+        case SSH_KEYTYPE_ECDSA:
             {
                 ssh_string e;
                 ssh_string i;
@@ -848,6 +859,7 @@ static int pki_import_pubkey_buffer(ssh_buffer buffer,
         break;
         case SSH_KEYTYPE_DSS_CERT01:
         case SSH_KEYTYPE_RSA_CERT01:
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             SSH_LOG(SSH_LOG_WARN, "Unknown public key protocol %d", type);
@@ -1049,6 +1061,7 @@ int ssh_pki_import_pubkey_file(const char *filename, ssh_key *pkey)
     enum ssh_keytypes_e type;
     struct stat sb;
     char *key_buf, *p;
+    size_t buflen, i;
     const char *q;
     FILE *file;
     off_t size;
@@ -1100,19 +1113,29 @@ int ssh_pki_import_pubkey_file(const char *filename, ssh_key *pkey)
         return SSH_ERROR;
     }
     key_buf[size] = '\0';
+    buflen = strlen(key_buf);
 
     q = p = key_buf;
-    while (!isspace((int)*p)) p++;
-    *p = '\0';
+    for (i = 0; i < buflen; i++) {
+        if (isspace((int)p[i])) {
+            p[i] = '\0';
+            break;
+        }
+    }
 
     type = ssh_key_type_from_name(q);
     if (type == SSH_KEYTYPE_UNKNOWN) {
         SAFE_FREE(key_buf);
         return SSH_ERROR;
     }
-    q = ++p;
-    while (!isspace((int)*p)) p++;
-    *p = '\0';
+
+    q = &p[i + 1];
+    for (; i < buflen; i++) {
+        if (isspace((int)p[i])) {
+            p[i] = '\0';
+            break;
+        }
+    }
 
     rc = ssh_pki_import_pubkey_base64(q, type, pkey);
     SAFE_FREE(key_buf);
@@ -1209,7 +1232,6 @@ int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
 
     switch(type){
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             rc = pki_key_generate_rsa(key, parameter);
             if(rc == SSH_ERROR)
                 goto error;
@@ -1219,8 +1241,8 @@ int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
             if(rc == SSH_ERROR)
                 goto error;
             break;
-        case SSH_KEYTYPE_ECDSA:
 #ifdef HAVE_ECC
+        case SSH_KEYTYPE_ECDSA:
             rc = pki_key_generate_ecdsa(key, parameter);
             if (rc == SSH_ERROR) {
                 goto error;
@@ -1238,7 +1260,9 @@ int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
             break;
         case SSH_KEYTYPE_DSS_CERT01:
         case SSH_KEYTYPE_RSA_CERT01:
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
+        default:
             goto error;
     }
 
@@ -1454,14 +1478,6 @@ int ssh_pki_copy_cert_to_privkey(const ssh_key certkey, ssh_key privkey) {
   return SSH_OK;
 }
 
-int ssh_pki_export_pubkey_rsa1(const ssh_key key,
-                               const char *host,
-                               char *rsa1,
-                               size_t rsa1_len)
-{
-    return pki_export_pubkey_rsa1(key, host, rsa1, rsa1_len);
-}
-
 int ssh_pki_export_signature_blob(const ssh_signature sig,
                                   ssh_string *sig_blob)
 {
@@ -1588,7 +1604,7 @@ int ssh_pki_signature_verify_blob(ssh_session session,
     }
 
 #ifdef __EBCDIC__
-    str = strdup(key->type_c);
+    str = strdup(sig->type_c);
     if (str == NULL) {
         ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
         return -1;
@@ -1601,7 +1617,7 @@ int ssh_pki_signature_verify_blob(ssh_session session,
 #else
     SSH_LOG(SSH_LOG_FUNCTIONS,
             "Going to verify a %s type signature",
-            key->type_c);
+            sig->type_c);
 #endif
 
     if (key->type == SSH_KEYTYPE_ECDSA) {

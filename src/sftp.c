@@ -24,12 +24,12 @@
 
 /* This file contains code written by Nick Zitzmann */
 
+#include "config.h"
+
 #include <errno.h>
 #include <ctype.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -342,6 +342,11 @@ sftp_packet sftp_packet_read(sftp_session sftp) {
     return NULL;
   }
 
+  r = ssh_buffer_allocate_size(packet->payload, 4);
+  if (r < 0) {
+    ssh_set_error_oom(sftp->session);
+    goto error;
+  }
   r=0;
   do {
     // read from channel until 4 bytes have been read or an error occurs
@@ -374,11 +379,16 @@ sftp_packet sftp_packet_read(sftp_session sftp) {
   ssh_buffer_get_u8(packet->payload, &packet->type);
 
   size = ntohl(tmp);
-  if (size == 0) {
+  if (size == 0 || size > UINT32_MAX) {
     return packet;
   }
   size--;
 
+  r = ssh_buffer_allocate_size(packet->payload, size);
+  if (r < 0) {
+    ssh_set_error_oom(sftp->session);
+    goto error;
+  }
   while (size > 0 && size < UINT_MAX) {
     r=ssh_channel_read(sftp->channel,buffer,
         sizeof(buffer)>size ? size:sizeof(buffer),0);
@@ -887,6 +897,7 @@ sftp_dir sftp_opendir(sftp_session sftp, const char *path){
   uint32_t id;
   char* pathCpy;
   char* pathConv;
+  int rc;
 
   payload = ssh_buffer_new();
   if (payload == NULL) {
@@ -917,6 +928,14 @@ sftp_dir sftp_opendir(sftp_session sftp, const char *path){
   }
 
   id = sftp_get_new_id(sftp);
+  rc = ssh_buffer_allocate_size(payload,
+                                sizeof(uint32_t) * 2 + ssh_string_len(path_s));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(payload);
+    ssh_string_free(path_s);
+    return NULL;
+  }
   if (ssh_buffer_add_u32(payload, htonl(id)) < 0 ||
       ssh_buffer_add_ssh_string(payload, path_s) < 0) {
     ssh_set_error_oom(sftp->session);
@@ -1446,6 +1465,7 @@ sftp_attributes sftp_readdir(sftp_session sftp, sftp_dir dir) {
   sftp_attributes attr;
   ssh_buffer payload;
   uint32_t id;
+  int rc;
 
   if (dir->buffer == NULL) {
     payload = ssh_buffer_new();
@@ -1454,6 +1474,14 @@ sftp_attributes sftp_readdir(sftp_session sftp, sftp_dir dir) {
       return NULL;
     }
 
+    rc = ssh_buffer_allocate_size(payload,
+                                  sizeof(uint32_t) * 2 +
+                                  ssh_string_len(dir->handle));
+    if (rc < 0) {
+      ssh_set_error_oom(sftp->session);
+      ssh_buffer_free(payload);
+      return NULL;
+    }
     id = sftp_get_new_id(sftp);
     if (ssh_buffer_add_u32(payload, htonl(id)) < 0 ||
         ssh_buffer_add_ssh_string(payload, dir->handle) < 0) {
@@ -1571,10 +1599,20 @@ static int sftp_handle_close(sftp_session sftp, ssh_string handle) {
   sftp_message msg = NULL;
   ssh_buffer buffer = NULL;
   uint32_t id;
+  int rc;
 
   buffer = ssh_buffer_new();
   if (buffer == NULL) {
     ssh_set_error_oom(sftp->session);
+    return -1;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 2 +
+                                ssh_string_len(handle));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
     return -1;
   }
 
@@ -1673,6 +1711,7 @@ sftp_file sftp_open(sftp_session sftp, const char *file, int flags,
   uint32_t id;
   char* fileCpy;
   char* fileConv;
+  int rc;
 
   buffer = ssh_buffer_new();
   if (buffer == NULL) {
@@ -1726,6 +1765,15 @@ sftp_file sftp_open(sftp_session sftp, const char *file, int flags,
       sftp_flags |= SSH_FXF_APPEND;
   }
   SSH_LOG(SSH_LOG_PACKET,"Opening file %s with sftp flags %x",file,sftp_flags);
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 4 +
+                                ssh_string_len(filename));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(filename);
+    return NULL;
+  }
   id = sftp_get_new_id(sftp);
   if (ssh_buffer_add_u32(buffer, htonl(id)) < 0 ||
       ssh_buffer_add_ssh_string(buffer, filename) < 0) {
@@ -2581,6 +2629,7 @@ int sftp_mkdir(sftp_session sftp, const char *directory, mode_t mode) {
   uint32_t id;
   char* directoryCpy;
   char* directoryConv;
+  int rc;
 
   buffer = ssh_buffer_new();
   if (buffer == NULL) {
@@ -2615,6 +2664,16 @@ int sftp_mkdir(sftp_session sftp, const char *directory, mode_t mode) {
   ZERO_STRUCT(attr);
   attr.permissions = mode;
   attr.flags = SSH_FILEXFER_ATTR_PERMISSIONS;
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 2 +
+                                ssh_string_len(path));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(path);
+    return -1;
+  }
 
   id = sftp_get_new_id(sftp);
   if (ssh_buffer_add_u32(buffer, htonl(id)) < 0 ||
@@ -2810,6 +2869,7 @@ int sftp_setstat(sftp_session sftp, const char *file, sftp_attributes attr) {
   sftp_status_message status = NULL;
   char* fileCpy;
   char* fileConv;
+  int rc;
 
   buffer = ssh_buffer_new();
   if (buffer == NULL) {
@@ -2838,6 +2898,16 @@ int sftp_setstat(sftp_session sftp, const char *file, sftp_attributes attr) {
   if (path == NULL) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
+    return -1;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 2 +
+                                ssh_string_len(path));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(path);
     return -1;
   }
 
@@ -3076,6 +3146,7 @@ char *sftp_readlink(sftp_session sftp, const char *path) {
   uint32_t id;
   char* pathCpy;
   char* pathConv;
+  int rc;
 
   if (sftp == NULL)
     return NULL;
@@ -3114,6 +3185,16 @@ char *sftp_readlink(sftp_session sftp, const char *path) {
   if (path_s == NULL) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
+    return NULL;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 2 +
+                                ssh_string_len(path_s));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(path_s);
     return NULL;
   }
 
@@ -3213,6 +3294,7 @@ sftp_statvfs_t sftp_statvfs(sftp_session sftp, const char *path) {
   uint32_t id;
   char* pathCpy;
   char* pathConv;
+  int rc;
 
   if (sftp == NULL)
     return NULL;
@@ -3266,6 +3348,18 @@ sftp_statvfs_t sftp_statvfs(sftp_session sftp, const char *path) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
     ssh_string_free(ext);
+    return NULL;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 3 +
+                                ssh_string_len(ext) +
+                                ssh_string_len(pathstr));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(ext);
+    ssh_string_free(pathstr);
     return NULL;
   }
 
@@ -3346,6 +3440,15 @@ int sftp_fsync(sftp_file file)
     if (ext == NULL) {
         ssh_set_error_oom(sftp->session);
         rc = -1;
+        goto done;
+    }
+
+    rc = ssh_buffer_allocate_size(buffer,
+                                        sizeof(uint32_t) * 3 +
+                                        ssh_string_len(ext) +
+                                        ssh_string_len(file->handle));
+    if (rc < 0) {
+        ssh_set_error_oom(sftp->session);
         goto done;
     }
 
@@ -3441,6 +3544,7 @@ sftp_statvfs_t sftp_fstatvfs(sftp_file file) {
   ssh_string ext;
   ssh_buffer buffer;
   uint32_t id;
+  int rc;
 
   if (file == NULL) {
     return NULL;
@@ -3463,6 +3567,17 @@ sftp_statvfs_t sftp_fstatvfs(sftp_file file) {
   if (ext == NULL) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
+    return NULL;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 3 +
+                                ssh_string_len(ext) +
+                                ssh_string_len(file->handle));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(ext);
     return NULL;
   }
 
@@ -3536,6 +3651,7 @@ char *sftp_canonicalize_path(sftp_session sftp, const char *path) {
   uint32_t id;
   char* pathCpy;
   char* pathConv;
+  int rc;
 
   if (sftp == NULL)
     return NULL;
@@ -3571,6 +3687,16 @@ char *sftp_canonicalize_path(sftp_session sftp, const char *path) {
   if (pathstr == NULL) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
+    return NULL;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 2 +
+                                ssh_string_len(pathstr));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(pathstr);
     return NULL;
   }
 
@@ -3640,6 +3766,12 @@ static sftp_attributes sftp_xstat(sftp_session sftp, const char *path,
   uint32_t id;
   char* pathCpy;
   char* pathConv;
+  int rc;
+
+  if (path == NULL) {
+      ssh_set_error_invalid(sftp->session);
+      return NULL;
+  }
 
   buffer = ssh_buffer_new();
   if (buffer == NULL) {
@@ -3668,6 +3800,16 @@ static sftp_attributes sftp_xstat(sftp_session sftp, const char *path,
   if (pathstr == NULL) {
     ssh_set_error_oom(sftp->session);
     ssh_buffer_free(buffer);
+    return NULL;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 2 +
+                                ssh_string_len(pathstr));
+  if (rc < 0) {
+    ssh_set_error_oom(sftp->session);
+    ssh_buffer_free(buffer);
+    ssh_string_free(pathstr);
     return NULL;
   }
 
@@ -3731,10 +3873,20 @@ sftp_attributes sftp_fstat(sftp_file file) {
   sftp_message msg = NULL;
   ssh_buffer buffer;
   uint32_t id;
+  int rc;
 
   buffer = ssh_buffer_new();
   if (buffer == NULL) {
     ssh_set_error_oom(file->sftp->session);
+    return NULL;
+  }
+
+  rc = ssh_buffer_allocate_size(buffer,
+                                sizeof(uint32_t) * 2 +
+                                ssh_string_len(file->handle));
+  if (rc < 0) {
+    ssh_set_error_oom(file->sftp->session);
+    ssh_buffer_free(buffer);
     return NULL;
   }
 

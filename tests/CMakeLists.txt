@@ -22,18 +22,16 @@ set(TORTURE_LINK_LIBRARIES
     ${LIBSSH_STATIC_LIBRARY}
     ${LIBSSH_LINK_LIBRARIES})
 
-if (LIBSSH_THREADS)
-    set(TORTURE_LINK_LIBRARIES
-        ${TORTURE_LINK_LIBRARIES}
-        ${LIBSSH_THREADS_STATIC_LIBRARY}
-        ${LIBSSH_THREADS_LINK_LIBRARIES})
-endif (LIBSSH_THREADS)
-
 # create test library
-add_library(${TORTURE_LIBRARY} STATIC cmdline.c torture.c)
-    target_link_libraries(${TORTURE_LIBRARY}
-        ${TORTURE_LINK_LIBRARIES}
-    )
+add_library(${TORTURE_LIBRARY}
+            STATIC
+                cmdline.c
+                torture.c
+                torture_key.c
+                torture_pki.c
+                torture_cmocka.c)
+target_link_libraries(${TORTURE_LIBRARY} ${TORTURE_LINK_LIBRARIES})
+
 if (ARGP_LIBRARY)
     target_link_libraries(${TORTURE_LIBRARY}
         ${ARGP_LIBRARY}
@@ -47,7 +45,7 @@ set(TEST_TARGET_LIBRARIES
 
 add_subdirectory(unittests)
 
-if (WITH_CLIENT_TESTING)
+if (CLIENT_TESTING)
     find_package(socket_wrapper 1.1.5 REQUIRED)
     find_package(nss_wrapper 1.1.2 REQUIRED)
     find_package(uid_wrapper 1.2.0 REQUIRED)
@@ -81,6 +79,14 @@ if (WITH_CLIENT_TESTING)
         execute_process(COMMAND ${ID_EXECUTABLE} -u OUTPUT_VARIABLE LOCAL_UID OUTPUT_STRIP_TRAILING_WHITESPACE)
     endif()
 
+    # chroot_wrapper
+    add_library(chroot_wrapper SHARED chroot_wrapper.c)
+    set(CHROOT_WRAPPER_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}chroot_wrapper${CMAKE_SHARED_LIBRARY_SUFFIX})
+    set(TEST_TARGET_LIBRARIES
+        ${TEST_TARGET_LIBRARIES}
+        chroot_wrapper
+    )
+
     # homedir will be used in passwd
     set(HOMEDIR ${CMAKE_CURRENT_BINARY_DIR}/home)
 
@@ -94,7 +100,8 @@ if (WITH_CLIENT_TESTING)
     configure_file(etc/pam_matrix_passdb.in ${CMAKE_CURRENT_BINARY_DIR}/etc/pam_matrix_passdb @ONLY)
     configure_file(etc/pam.d/sshd.in ${CMAKE_CURRENT_BINARY_DIR}/etc/pam.d/sshd @ONLY)
 
-    set(TORTURE_ENVIRONMENT "LD_PRELOAD=${SOCKET_WRAPPER_LIBRARY}:${NSS_WRAPPER_LIBRARY}:${UID_WRAPPER_LIBRARY}:${PAM_WRAPPER_LIBRARY}")
+
+    set(TORTURE_ENVIRONMENT "LD_PRELOAD=${SOCKET_WRAPPER_LIBRARY}:${NSS_WRAPPER_LIBRARY}:${UID_WRAPPER_LIBRARY}:${PAM_WRAPPER_LIBRARY}:${CHROOT_WRAPPER_LIBRARY}")
     list(APPEND TORTURE_ENVIRONMENT UID_WRAPPER=1 UID_WRAPPER_ROOT=1)
     list(APPEND TORTURE_ENVIRONMENT NSS_WRAPPER_PASSWD=${CMAKE_CURRENT_BINARY_DIR}/etc/passwd)
     list(APPEND TORTURE_ENVIRONMENT NSS_WRAPPER_SHADOW=${CMAKE_CURRENT_BINARY_DIR}/etc/shadow)
@@ -116,12 +123,16 @@ if (WITH_CLIENT_TESTING)
     message(STATUS "TORTURE_ENVIRONMENT=${TORTURE_ENVIRONMENT}")
 
     add_subdirectory(client)
-endif (WITH_CLIENT_TESTING)
+endif (CLIENT_TESTING)
 
 if (WITH_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif (WITH_BENCHMARKS)
 
-if (WITH_SERVER)
+if (WITH_SERVER AND SERVER_TESTING)
     add_subdirectory(pkd)
-endif (WITH_SERVER)
+endif (WITH_SERVER AND SERVER_TESTING)
+
+if (FUZZ_TESTING)
+    add_subdirectory(fuzz)
+endif()

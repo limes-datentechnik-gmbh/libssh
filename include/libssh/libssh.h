@@ -78,8 +78,8 @@
 
 /* libssh version */
 #define LIBSSH_VERSION_MAJOR  0
-#define LIBSSH_VERSION_MINOR  7
-#define LIBSSH_VERSION_MICRO  0
+#define LIBSSH_VERSION_MINOR  8
+#define LIBSSH_VERSION_MICRO  90
 
 #define LIBSSH_VERSION_INT SSH_VERSION_INT(LIBSSH_VERSION_MAJOR, \
                                            LIBSSH_VERSION_MINOR, \
@@ -238,6 +238,15 @@ enum ssh_server_known_e {
 	SSH_SERVER_FILE_NOT_FOUND
 };
 
+enum ssh_known_hosts_e {
+    SSH_KNOWN_HOSTS_ERROR = -2,
+    SSH_KNOWN_HOSTS_NOT_FOUND = -1,
+    SSH_KNOWN_HOSTS_UNKNOWN = 0,
+    SSH_KNOWN_HOSTS_OK,
+    SSH_KNOWN_HOSTS_CHANGED,
+    SSH_KNOWN_HOSTS_OTHER,
+};
+
 #ifndef MD5_DIGEST_LEN
     #define MD5_DIGEST_LEN 16
 #endif
@@ -266,6 +275,16 @@ enum ssh_keycmp_e {
   SSH_KEY_CMP_PUBLIC = 0,
   SSH_KEY_CMP_PRIVATE
 };
+
+#define SSH_ADDRSTRLEN 46
+
+struct ssh_knownhosts_entry {
+    char *hostname;
+    char *unparsed;
+    ssh_key publickey;
+    char *comment;
+};
+
 
 /* Error return codes */
 #define SSH_OK 0     /* No error */
@@ -351,6 +370,12 @@ enum ssh_options_e {
   SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS,
   SSH_OPTIONS_HMAC_C_S,
   SSH_OPTIONS_HMAC_S_C,
+  SSH_OPTIONS_PASSWORD_AUTH,
+  SSH_OPTIONS_PUBKEY_AUTH,
+  SSH_OPTIONS_KBDINT_AUTH,
+  SSH_OPTIONS_GSSAPI_AUTH,
+  SSH_OPTIONS_GLOBAL_KNOWNHOSTS,
+  SSH_OPTIONS_NODELAY,
   SSH_OPTIONS_UTF8_TO_LOCAL,
   SSH_OPTIONS_LOCAL_TO_UTF8,
 };
@@ -419,6 +444,7 @@ LIBSSH_API int ssh_channel_request_pty_size(ssh_channel channel, const char *ter
     int cols, int rows);
 LIBSSH_API int ssh_channel_request_shell(ssh_channel channel);
 LIBSSH_API int ssh_channel_request_send_signal(ssh_channel channel, const char *signum);
+LIBSSH_API int ssh_channel_request_send_break(ssh_channel channel, uint32_t length);
 LIBSSH_API int ssh_channel_request_sftp(ssh_channel channel);
 LIBSSH_API int ssh_channel_request_subsystem(ssh_channel channel, const char *subsystem);
 LIBSSH_API int ssh_channel_request_x11(ssh_channel channel, int single_connection, const char *protocol,
@@ -504,6 +530,29 @@ LIBSSH_API int ssh_init(void);
 LIBSSH_API int ssh_is_blocking(ssh_session session);
 LIBSSH_API int ssh_is_connected(ssh_session session);
 LIBSSH_API int ssh_is_server_known(ssh_session session);
+
+/* KNOWN HOSTS */
+LIBSSH_API void ssh_knownhosts_entry_free(struct ssh_knownhosts_entry *entry);
+#define SSH_KNOWNHOSTS_ENTRY_FREE(e) do { \
+  if ((e) != NULL) { \
+    ssh_knownhosts_entry_free(e); \
+    e = NULL; \
+  } \
+} while(0)
+
+LIBSSH_API int ssh_known_hosts_parse_line(const char *host,
+                                          const char *line,
+                                          struct ssh_knownhosts_entry **entry);
+LIBSSH_API enum ssh_known_hosts_e ssh_session_has_known_hosts_entry(ssh_session session);
+
+LIBSSH_API int ssh_session_export_known_hosts_entry(ssh_session session,
+                                                    char **pentry_string);
+LIBSSH_API int ssh_session_update_known_hosts(ssh_session session);
+
+LIBSSH_API enum ssh_known_hosts_e
+ssh_session_get_known_hosts_entry(ssh_session session,
+                                  struct ssh_knownhosts_entry **pentry);
+LIBSSH_API enum ssh_known_hosts_e ssh_session_is_known_server(ssh_session session);
 
 /* LOGGING */
 LIBSSH_API int ssh_set_log_level(int level);
@@ -752,4 +801,3 @@ LIBSSH_API uint32_t ssh_buffer_get_len(ssh_buffer buffer);
 }
 #endif
 #endif /* _LIBSSH_H */
-/* vim: set ts=2 sw=2 et cindent: */

@@ -21,8 +21,6 @@
  * along with the SSH Library; see the file COPYING.  If not, write to
  * the Free Software Foundation, Inc., 59 Temple Place - Suite 330, Boston,
  * MA 02111-1307, USA.
- *
- * vim: ts=2 sw=2 et cindent
  */
 
 #include "config.h"
@@ -812,20 +810,23 @@ void ssh_event_remove_poll(ssh_event event, ssh_poll_handle p)
  *          SSH_ERROR   on failure
  */
 int ssh_event_add_session(ssh_event event, ssh_session session) {
-    unsigned int i;
     ssh_poll_handle p;
 #ifdef WITH_SERVER
     struct ssh_iterator *iterator;
 #endif
-    
+
     if(event == NULL || event->ctx == NULL || session == NULL) {
         return SSH_ERROR;
     }
     if(session->default_poll_ctx == NULL) {
         return SSH_ERROR;
     }
-    for(i = 0; i < session->default_poll_ctx->polls_used; i++) {
-        p = session->default_poll_ctx->pollptrs[i];
+    while (session->default_poll_ctx->polls_used > 0) {
+        p = session->default_poll_ctx->pollptrs[0];
+        /*
+         * ssh_poll_ctx_remove() decrements
+         * session->default_poll_ctx->polls_used
+         */
         ssh_poll_ctx_remove(session->default_poll_ctx, p);
         ssh_poll_ctx_add(event->ctx, p);
         /* associate the pollhandler with a session so we can put it back
@@ -961,11 +962,21 @@ int ssh_event_remove_session(ssh_event event, ssh_session session) {
     for(i = 0; i < used; i++) {
     	p = event->ctx->pollptrs[i];
     	if(p->session == session){
+            /*
+             * ssh_poll_ctx_remove() decrements
+             * event->ctx->polls_used
+             */
             ssh_poll_ctx_remove(event->ctx, p);
             p->session = NULL;
             ssh_poll_ctx_add(session->default_poll_ctx, p);
             rc = SSH_OK;
-            used = 0;
+            /*
+             * Restart the loop!
+             * A session can initially have two pollhandlers.
+             */
+            used = event->ctx->polls_used;
+            i = 0;
+
         }
     }
 #ifdef WITH_SERVER
@@ -1031,5 +1042,3 @@ void ssh_event_free(ssh_event event) {
 }
 
 /** @} */
-
-/* vim: set ts=4 sw=4 et cindent: */

@@ -314,7 +314,7 @@ static int privatekey_decrypt(int algo, int mode, unsigned int key_len,
   if (gcry_cipher_open(&cipher, algo, mode, 0)
       || gcry_cipher_setkey(cipher, key, key_len)
       || gcry_cipher_setiv(cipher, iv, iv_len)
-      || (tmp = malloc(ssh_buffer_get_len(data) * sizeof (char))) == NULL
+      || (tmp = calloc(ssh_buffer_get_len(data), sizeof(char))) == NULL
       || gcry_cipher_decrypt(cipher, tmp, ssh_buffer_get_len(data),
                        ssh_buffer_get(data), ssh_buffer_get_len(data))) {
     gcry_cipher_close(cipher);
@@ -918,11 +918,6 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
     enum ssh_keytypes_e type;
     int valid;
 
-    /* needed for gcrypt initialization */
-    if (ssh_init() < 0) {
-        return NULL;
-    }
-
     type = pki_privatekey_type_from_string(b64_key);
     if (type == SSH_KEYTYPE_UNKNOWN) {
         SSH_LOG(SSH_LOG_WARN, "Unknown or invalid private key.");
@@ -950,7 +945,6 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             if (passphrase == NULL) {
                 if (auth_fn) {
                     valid = b64decode_rsa_privatekey(b64_key, &rsa, auth_fn,
@@ -1000,7 +994,8 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
             break;
 #endif
         case SSH_KEYTYPE_ED25519:
-		/* Cannot open ed25519 keys with libgcrypt */
+            /* Cannot open ed25519 keys with libgcrypt */
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             SSH_LOG(SSH_LOG_WARN, "Unkown or invalid private key type %d", type);
@@ -1146,7 +1141,6 @@ ssh_key pki_key_dup(const ssh_key key, int demote)
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             err = gcry_sexp_extract_param(key->rsa,
                                           NULL,
                                           "ned?p?q?u?",
@@ -1216,6 +1210,7 @@ ssh_key pki_key_dup(const ssh_key key, int demote)
             }
             break;
 #endif
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             ssh_key_free(new);
@@ -1321,19 +1316,19 @@ static int _bignum_cmp(const gcry_sexp_t s1,
 
     sexp = gcry_sexp_find_token(s2, what, 0);
     if (sexp == NULL) {
-        bignum_free(b1);
+        bignum_safe_free(b1);
         return 1;
     }
     b2 = gcry_sexp_nth_mpi(sexp, 1, GCRYMPI_FMT_USG);
     gcry_sexp_release(sexp);
     if (b2 == NULL) {
-        bignum_free(b1);
+        bignum_safe_free(b1);
         return 1;
     }
 
     result = !! bignum_cmp(b1, b2);
-    bignum_free(b1);
-    bignum_free(b2);
+    bignum_safe_free(b1);
+    bignum_safe_free(b2);
     return result;
 }
 
@@ -1366,7 +1361,6 @@ int pki_key_compare(const ssh_key k1,
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             if (_bignum_cmp(k1->rsa, k2->rsa, "e") != 0) {
                 return 1;
             }
@@ -1413,6 +1407,7 @@ int pki_key_compare(const ssh_key k1,
 #endif
         case SSH_KEYTYPE_DSS_CERT01:
         case SSH_KEYTYPE_RSA_CERT01:
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
             return 1;
     }
@@ -1521,7 +1516,6 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
 
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             e = ssh_sexp_extract_mpi(key->rsa,
                                      "e",
                                      GCRYMPI_FMT_USG,
@@ -1592,6 +1586,7 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
             e = NULL;
             break;
 #endif
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             goto fail;
@@ -1626,36 +1621,6 @@ fail:
     ssh_string_free(n);
 
     return NULL;
-}
-
-int pki_export_pubkey_rsa1(const ssh_key key,
-                           const char *host,
-                           char *rsa1,
-                           size_t rsa1_len)
-{
-    gpg_error_t err;
-    int rsa_size;
-    bignum E, N;
-    char *e, *n;
-
-    err = gcry_sexp_extract_param(key->rsa, NULL, "en", &E, &N, NULL);
-    if (err != 0) {
-        return SSH_ERROR;
-    }
-    e = bignum_bn2dec(E);
-    n = bignum_bn2dec(N);
-
-    rsa_size = (gcry_pk_get_nbits(key->rsa) + 7) / 8;
-
-    snprintf(rsa1, rsa1_len,
-             "%s %d %s %s\n",
-             host, rsa_size << 3, e, n);
-    SAFE_FREE(e);
-    SAFE_FREE(n);
-    bignum_free(E);
-    bignum_free(N);
-
-    return SSH_OK;
 }
 
 ssh_string pki_signature_to_blob(const ssh_signature sig)
@@ -1721,7 +1686,6 @@ ssh_string pki_signature_to_blob(const ssh_signature sig)
             ssh_string_fill(sig_blob, buffer, 40);
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             sexp = gcry_sexp_find_token(sig->rsa_sig, "s", 0);
             if (sexp == NULL) {
                 return NULL;
@@ -1796,6 +1760,7 @@ ssh_string pki_signature_to_blob(const ssh_signature sig)
                 break;
             }
 #endif
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             SSH_LOG(SSH_LOG_WARN, "Unknown signature key type: %d", sig->type);
@@ -1856,7 +1821,6 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             rsalen = (gcry_pk_get_nbits(pubkey->rsa) + 7) / 8;
 
             if (len > rsalen) {
@@ -1971,6 +1935,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
             }
             break;
 #endif
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             SSH_LOG(SSH_LOG_WARN, "Unknown signature type");
@@ -2021,7 +1986,6 @@ int pki_signature_verify(ssh_session session,
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             err = gcry_sexp_build(&sexp,
                                   NULL,
                                   "(data(flags pkcs1)(hash sha1 %b))",
@@ -2082,6 +2046,7 @@ int pki_signature_verify(ssh_session session,
             }
             break;
 #endif
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             ssh_set_error(session, SSH_FATAL, "Unknown public key type");
@@ -2129,7 +2094,6 @@ ssh_signature pki_do_sign(const ssh_key privkey,
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             err = gcry_sexp_build(&sexp,
                                   NULL,
                                   "(data(flags pkcs1)(hash sha1 %b))",
@@ -2174,6 +2138,7 @@ ssh_signature pki_do_sign(const ssh_key privkey,
             }
             break;
 #endif
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             ssh_signature_free(sig);
@@ -2223,7 +2188,6 @@ ssh_signature pki_do_sign_sessionid(const ssh_key key,
             }
             break;
         case SSH_KEYTYPE_RSA:
-        case SSH_KEYTYPE_RSA1:
             err = gcry_sexp_build(&sexp,
                                   NULL,
                                   "(data(flags pkcs1)(hash sha1 %b))",
@@ -2261,6 +2225,7 @@ ssh_signature pki_do_sign_sessionid(const ssh_key key,
             }
             break;
 #endif
+        case SSH_KEYTYPE_RSA1:
         case SSH_KEYTYPE_UNKNOWN:
         default:
             return NULL;
@@ -2271,5 +2236,3 @@ ssh_signature pki_do_sign_sessionid(const ssh_key key,
 #endif /* WITH_SERVER */
 
 #endif /* HAVE_LIBGCRYPT */
-
-/* vim: set ts=4 sw=4 et cindent: */

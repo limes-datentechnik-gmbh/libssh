@@ -115,10 +115,13 @@ SSH_PACKET_CALLBACK(ssh_packet_dh_reply){
       break;
 #ifdef HAVE_ECDH
     case SSH_KEX_ECDH_SHA2_NISTP256:
+    case SSH_KEX_ECDH_SHA2_NISTP384:
+    case SSH_KEX_ECDH_SHA2_NISTP521:
       rc = ssh_client_ecdh_reply(session, packet);
       break;
 #endif
 #ifdef HAVE_CURVE25519
+    case SSH_KEX_CURVE25519_SHA256:
     case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
       rc = ssh_client_curve25519_reply(session, packet);
       break;
@@ -160,7 +163,8 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
     /* server things are done in server.c */
     session->dh_handshake_state=DH_STATE_FINISHED;
   } else {
-    ssh_key key;
+    ssh_key server_key;
+
     /* client */
     rc = ssh_make_sessionid(session);
     if (rc != SSH_OK) {
@@ -171,8 +175,9 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
      * Set the cryptographic functions for the next crypto
      * (it is needed for ssh_generate_session_keys for key lengths)
      */
-    if (crypt_set_algorithms(session, SSH_3DES) /* knows nothing about DES*/ ) {
-      goto error;
+    rc = crypt_set_algorithms_client(session);
+    if (rc < 0) {
+        goto error;
     }
 
     if (ssh_generate_session_keys(session) < 0) {
@@ -189,8 +194,8 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
 #endif
 
     /* get the server public key */
-    rc = ssh_pki_import_pubkey_blob(session->next_crypto->server_pubkey, &key);
-    if (rc < 0) {
+    server_key = ssh_dh_get_next_server_publickey(session);
+    if (server_key == NULL) {
         return SSH_ERROR;
     }
 
@@ -219,14 +224,13 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
         free(str);
 #else
         if(!ssh_match_group(session->opts.wanted_methods[SSH_HOSTKEYS],
-                            key->type_c)) {
+                            server_key->type_c)) {
             ssh_set_error(session,
                           SSH_FATAL,
                           "Public key from server (%s) doesn't match user "
                           "preference (%s)",
-                          key->type_c,
+                          server_key->type_c,
                           session->opts.wanted_methods[SSH_HOSTKEYS]);
-            ssh_key_free(key);
             return -1;
         }
 #endif /* __EBCDIC */
@@ -234,13 +238,9 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
 
     rc = ssh_pki_signature_verify_blob(session,
                                        sig_blob,
-                                       key,
+                                       server_key,
                                        session->next_crypto->secret_hash,
                                        session->next_crypto->digest_len);
-    /* Set the server public key type for known host checking */
-    session->next_crypto->server_pubkey_type = key->type_c;
-
-    ssh_key_free(key);
     ssh_string_burn(sig_blob);
     ssh_string_free(sig_blob);
     sig_blob = NULL;

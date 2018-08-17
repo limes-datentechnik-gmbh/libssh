@@ -1,3 +1,5 @@
+#include "config.h"
+
 #define LIBSSH_STATIC
 #include <libssh/priv.h>
 #include <libssh/callbacks.h>
@@ -14,10 +16,15 @@
 #define NUM_THREADS 100
 
 static int setup(void **state) {
+    int rc;
+
     (void) state;
 
     ssh_threads_set_callbacks(ssh_threads_get_pthread());
-    ssh_init();
+    rc = ssh_init();
+    if (rc != SSH_OK) {
+        return -1;
+    }
 
     return 0;
 }
@@ -33,14 +40,14 @@ static int teardown(void **state) {
 static void *torture_rand_thread(void *threadid) {
     char buffer[12];
     int i;
-    int r;
+    int ok;
 
     (void) threadid;
 
     buffer[0] = buffer[1] = buffer[10] = buffer[11] = 'X';
     for(i = 0; i < NUM_LOOPS; ++i) {
-        r = ssh_get_random(&buffer[2], i % 8 + 1, 0);
-        assert_true(r == 1);
+        ok = ssh_get_random(&buffer[2], i % 8 + 1, 0);
+        assert_true(ok);
     }
 
     pthread_exit(NULL);

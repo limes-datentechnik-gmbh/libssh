@@ -50,6 +50,8 @@ int ssh_buffer_add_u64(ssh_buffer buffer, uint64_t data);
 
 int ssh_buffer_validate_length(struct ssh_buffer_struct *buffer, size_t len);
 
+void *ssh_buffer_allocate(struct ssh_buffer_struct *buffer, uint32_t len);
+int ssh_buffer_allocate_size(struct ssh_buffer_struct *buffer, uint32_t len);
 int ssh_buffer_pack_va(struct ssh_buffer_struct *buffer,
                        const char *format,
                        int argc,
@@ -81,8 +83,7 @@ int ssh_buffer_get_u64(ssh_buffer buffer, uint64_t *data);
 
 /* ssh_buffer_get_ssh_string() is an exception. if the String read is too large or invalid, it will answer NULL. */
 ssh_string ssh_buffer_get_ssh_string(ssh_buffer buffer);
-/* ssh_gets a string out of a SSH-1 mpint */
-ssh_string ssh_buffer_get_mpint(ssh_buffer buffer);
+
 /* ssh_buffer_pass_bytes acts as if len bytes have been read (used for padding) */
 uint32_t ssh_buffer_pass_bytes_end(ssh_buffer buffer, uint32_t len);
 uint32_t ssh_buffer_pass_bytes(ssh_buffer buffer, uint32_t len);
