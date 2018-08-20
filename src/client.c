@@ -200,8 +200,10 @@ int ssh_send_banner(ssh_session session, int server)
             if(session->serverbanner == NULL) {
                 goto end;
             }
-            strcpy(session->serverbanner, "SSH-2.0-");
-            strcat(session->serverbanner, session->opts.custombanner);
+            snprintf(session->serverbanner,
+                     len + 8 + 1,
+                     "SSH-2.0-%s",
+                     session->opts.custombanner);
         }
 
 #ifdef __EBCDIC__

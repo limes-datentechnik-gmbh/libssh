@@ -1966,7 +1966,7 @@ int ssh_channel_request_x11(ssh_channel channel, int single_connection, const ch
   rc = ssh_buffer_pack(buffer,
                        "bssd",
                        single_connection == 0 ? 0 : 1,
-                       protocol,
+                       protocol ? protocol : "MIT-MAGIC-COOKIE-1",
                        cookie ? cookie : c,
                        screen_number);
   if (c != NULL){
