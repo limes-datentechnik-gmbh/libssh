@@ -355,9 +355,6 @@ int main(void) {
     return 0;
 }" HAVE_COMPILER__FUNCTION__)
 
-# Stop treating warnings as errors
-unset(CMAKE_REQUIRED_FLAGS)
-
 check_c_source_compiles("
 #define ARRAY_LEN 16
 void test_attr(const unsigned char *k)
@@ -366,6 +363,9 @@ void test_attr(const unsigned char *k)
 int main(void) {
     return 0;
 }" HAVE_GCC_BOUNDED_ATTRIBUTE)
+
+# Stop treating warnings as errors
+unset(CMAKE_REQUIRED_FLAGS)
 
 if (WITH_DEBUG_CRYPTO)
   set(DEBUG_CRYPTO 1)
