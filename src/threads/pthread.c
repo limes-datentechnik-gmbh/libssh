@@ -80,6 +80,8 @@ static unsigned long ssh_pthread_thread_id (void)
 {
 #if defined(_WIN32) && !defined(__WINPTHREADS_VERSION)
     return (unsigned long) pthread_self().p;
+#elif defined(__EBCDIC__)
+    return (unsigned long) pthread_self().__;
 #else
     return (unsigned long) pthread_self();
 #endif

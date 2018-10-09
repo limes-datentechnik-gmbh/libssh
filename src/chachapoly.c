@@ -36,12 +36,24 @@ struct chacha20_poly1305_keysched {
     struct chacha_ctx k2;
 };
 
-#pragma pack(push, 1)
+#if defined(__EBCDIC__)
+#  pragma pack(packed)
+#elif defined (__PAIX__)
+#  pragma pack(1)
+#else
+#  pragma pack(push, _chachapoly, 1)
+#endif
 struct ssh_packet_header {
     uint32_t length;
     uint8_t payload[];
 };
-#pragma pack(pop)
+#if defined(__EBCDIC__)
+#  pragma pack(reset)
+#elif defined (__PAIX__)
+#  pragma pack(pop)
+#else
+#  pragma pack(pop, _chachapoly)
+#endif
 
 static const uint8_t zero_block_counter[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 static const uint8_t payload_block_counter[8] = {1, 0, 0, 0, 0, 0, 0, 0};
