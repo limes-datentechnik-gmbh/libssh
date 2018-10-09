@@ -205,7 +205,7 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
         str = strdup(server_key->type_c);
         if (str == NULL) {
             ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
-            ssh_key_free(key);
+            ssh_key_free(server_key);
             return -1;
         }
         ssh_string_to_ebcdic(str, str, strlen(str));
@@ -218,7 +218,7 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
                           str,
                           session->opts.wanted_methods[SSH_HOSTKEYS]);
             free(str);
-            ssh_key_free(key);
+            ssh_key_free(server_key);
             return -1;
         }
         free(str);
