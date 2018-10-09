@@ -202,7 +202,7 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
     /* check if public key from server matches user preferences */
     if (session->opts.wanted_methods[SSH_HOSTKEYS]) {
 #ifdef __EBCDIC__
-        str = strdup(key->type_c);
+        str = strdup(server_key->type_c);
         if (str == NULL) {
             ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
             ssh_key_free(key);
