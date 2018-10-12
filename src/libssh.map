@@ -1,4 +1,4 @@
-# This map file was created with abimap-0.3.0
+# This map file was updated with abimap-0.3.1
 
 LIBSSH_4_5_0    # Released
 {
@@ -418,3 +418,16 @@ LIBSSH_4_5_0    # Released
         *;
 } ;
 
+LIBSSH_4_6_0    # Released
+{
+    global:
+        ssh_print_hash;
+} LIBSSH_4_5_0;
+
+LIBSSH_4_7_0    # Released
+{
+    global:
+        sftp_client_message_get_submessage;
+        ssh_get_fingerprint_hash;
+        ssh_pki_export_privkey_base64;
+} LIBSSH_4_6_0;

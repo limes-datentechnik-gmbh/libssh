@@ -4,7 +4,7 @@ include(CheckSymbolExists)
 include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CheckTypeSize)
-include(CheckCXXSourceCompiles)
+include(CheckStructHasMember)
 include(TestBigEndian)
 
 set(PACKAGE ${PROJECT_NAME})
@@ -150,12 +150,14 @@ endif (NOT WITH_MBEDTLS)
 
 check_function_exists(isblank HAVE_ISBLANK)
 check_function_exists(strncpy HAVE_STRNCPY)
+check_function_exists(strndup HAVE_STRNDUP)
 check_function_exists(strtoull HAVE_STRTOULL)
 check_function_exists(explicit_bzero HAVE_EXPLICIT_BZERO)
 check_function_exists(memset_s HAVE_MEMSET_S)
 
 if (HAVE_GLOB_H)
-  check_function_exists(glob HAVE_GLOB)
+    check_struct_has_member(glob_t gl_flags glob.h HAVE_GLOB_GL_FLAGS_MEMBER)
+    check_function_exists(glob HAVE_GLOB)
 endif (HAVE_GLOB_H)
 
 if (NOT WIN32)
@@ -272,7 +274,17 @@ int main(void) {
 # For detecting attributes we need to treat warnings as
 # errors
 if (UNIX)
-    set(CMAKE_REQUIRED_FLAGS "-Werror")
+    # Get warnings for attributs
+    check_c_compiler_flag("-Wattributs" REQUIRED_FLAGS_WERROR)
+    if (REQUIRED_FLAGS_WERROR)
+        set(CMAKE_REQUIRED_FLAGS "-Wattributes")
+    endif()
+
+    # Turn warnings into errors
+    check_c_compiler_flag("-Werror" REQUIRED_FLAGS_WERROR)
+    if (REQUIRED_FLAGS_WERROR)
+        set(CMAKE_REQUIRED_FLAGS "-Werror")
+    endif()
 endif (UNIX)
 
 check_c_source_compiles("
@@ -366,6 +378,20 @@ int main(void) {
 
 # Stop treating warnings as errors
 unset(CMAKE_REQUIRED_FLAGS)
+
+# Check for version script support
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/conftest.map" "VERS_1 {
+        global: sym;
+};
+VERS_2 {
+        global: sym;
+} VERS_1;
+")
+
+set(CMAKE_REQUIRED_FLAGS "-Wl,--version-script=\"${CMAKE_CURRENT_BINARY_DIR}/conftest.map\"")
+check_c_source_compiles("int main(void) { return 0; }" HAVE_LD_VERSION_SCRIPT)
+unset(CMAKE_REQUIRED_FLAGS)
+file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/conftest.map")
 
 if (WITH_DEBUG_CRYPTO)
   set(DEBUG_CRYPTO 1)

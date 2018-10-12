@@ -67,7 +67,6 @@
 
 static int dh_handshake_server(ssh_session session);
 
-
 /**
  * @addtogroup libssh_server
  *
@@ -87,7 +86,7 @@ static int server_set_kex(ssh_session session) {
   struct ssh_kex_struct *server = &session->next_crypto->server_kex;
   int i, j, rc;
   const char *wanted;
-  char hostkeys[64] = {0};
+  char hostkeys[128] = {0};
   enum ssh_keytypes_e keytype;
   size_t len;
   int ok;
@@ -123,6 +122,11 @@ static int server_set_kex(ssh_session session) {
   }
 #endif
   if (session->srv.rsa_key != NULL) {
+      /* We support also the SHA2 variants */
+      len = strlen(hostkeys);
+      snprintf(hostkeys + len, sizeof(hostkeys) - len,
+               ",rsa-sha2-512,rsa-sha2-256");
+
       len = strlen(hostkeys);
       keytype = ssh_key_type(session->srv.rsa_key);
 
@@ -194,6 +198,37 @@ static int ssh_server_kexdh_init(ssh_session session, ssh_buffer packet){
     return SSH_OK;
 }
 
+static int ssh_server_send_extensions(ssh_session session) {
+    int rc;
+    const char *hostkey_algorithms;
+
+    SSH_LOG(SSH_LOG_PACKET, "Sending SSH_MSG_EXT_INFO");
+    /*
+     * We can list here all the default hostkey methods, since
+     * they already contain the SHA2 extension algorithms
+     */
+    hostkey_algorithms = ssh_kex_get_default_methods(SSH_HOSTKEYS);
+    rc = ssh_buffer_pack(session->out_buffer,
+                         "bdss",
+                         SSH2_MSG_EXT_INFO,
+                         1, /* nr. of extensions */
+                         "server-sig-algs",
+                         hostkey_algorithms);
+    if (rc != SSH_OK) {
+        goto error;
+    }
+
+    if (ssh_packet_send(session) == SSH_ERROR) {
+        goto error;
+    }
+
+    return 0;
+error:
+    ssh_buffer_reinit(session->out_buffer);
+
+    return -1;
+}
+
 SSH_PACKET_CALLBACK(ssh_packet_kexdh_init){
   int rc = SSH_ERROR;
   (void)type;
@@ -217,6 +252,8 @@ SSH_PACKET_CALLBACK(ssh_packet_kexdh_init){
   switch(session->next_crypto->kex_type){
       case SSH_KEX_DH_GROUP1_SHA1:
       case SSH_KEX_DH_GROUP14_SHA1:
+      case SSH_KEX_DH_GROUP16_SHA512:
+      case SSH_KEX_DH_GROUP18_SHA512:
         rc=ssh_server_kexdh_init(session, packet);
         break;
   #ifdef HAVE_ECDH
@@ -486,6 +523,15 @@ static void ssh_server_connection_callback(ssh_session session){
                 session->session_state=SSH_SESSION_STATE_AUTHENTICATING;
                 if (session->flags & SSH_SESSION_FLAG_AUTHENTICATED)
                     session->session_state = SSH_SESSION_STATE_AUTHENTICATED;
+
+               /*
+                * If the client supports extension negotiation, we will send
+                * our supported extensions now. This is the first message after
+                * sending NEWKEYS message and after turning on crypto.
+                */
+               if (session->extensions) {
+                   ssh_server_send_extensions(session);
+               }
             }
             break;
         case SSH_SESSION_STATE_AUTHENTICATING:
@@ -574,7 +620,7 @@ static int ssh_server_kex_termination(void *s){
 
 void ssh_set_auth_methods(ssh_session session, int auth_methods){
 	/* accept only methods in range */
-	session->auth_methods = auth_methods & 0x3f;
+    session->auth.supported_methods = auth_methods & 0x3f;
 }
 
 /* Do the banner and key exchange */
@@ -625,26 +671,26 @@ int ssh_auth_reply_default(ssh_session session,int partial) {
   int rc = SSH_ERROR;
 
 
-  if (session->auth_methods == 0) {
-    session->auth_methods = SSH_AUTH_METHOD_PUBLICKEY | SSH_AUTH_METHOD_PASSWORD;
+  if (session->auth.supported_methods == 0) {
+    session->auth.supported_methods = SSH_AUTH_METHOD_PUBLICKEY | SSH_AUTH_METHOD_PASSWORD;
   }
-  if (session->auth_methods & SSH_AUTH_METHOD_PUBLICKEY) {
+  if (session->auth.supported_methods & SSH_AUTH_METHOD_PUBLICKEY) {
     strncat(methods_c, "publickey,",
             sizeof(methods_c) - strlen(methods_c) - 1);
   }
-  if (session->auth_methods & SSH_AUTH_METHOD_GSSAPI_MIC){
+  if (session->auth.supported_methods & SSH_AUTH_METHOD_GSSAPI_MIC){
 	  strncat(methods_c,"gssapi-with-mic,",
 			  sizeof(methods_c) - strlen(methods_c) - 1);
   }
-  if (session->auth_methods & SSH_AUTH_METHOD_INTERACTIVE) {
+  if (session->auth.supported_methods & SSH_AUTH_METHOD_INTERACTIVE) {
     strncat(methods_c, "keyboard-interactive,",
             sizeof(methods_c) - strlen(methods_c) - 1);
   }
-  if (session->auth_methods & SSH_AUTH_METHOD_PASSWORD) {
+  if (session->auth.supported_methods & SSH_AUTH_METHOD_PASSWORD) {
     strncat(methods_c, "password,",
             sizeof(methods_c) - strlen(methods_c) - 1);
   }
-  if (session->auth_methods & SSH_AUTH_METHOD_HOSTBASED) {
+  if (session->auth.supported_methods & SSH_AUTH_METHOD_HOSTBASED) {
     strncat(methods_c, "hostbased,",
             sizeof(methods_c) - strlen(methods_c) - 1);
   }
@@ -887,7 +933,7 @@ int ssh_message_auth_set_methods(ssh_message msg, int methods) {
     return -1;
   }
 
-  msg->session->auth_methods = methods;
+  msg->session->auth.supported_methods = methods;
 
   return 0;
 }

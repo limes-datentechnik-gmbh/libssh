@@ -60,11 +60,10 @@ ssh_session ssh_new(void) {
   char *id = NULL;
   int rc;
 
-  session = malloc(sizeof (struct ssh_session_struct));
+  session = calloc(1, sizeof (struct ssh_session_struct));
   if (session == NULL) {
     return NULL;
   }
-  ZERO_STRUCTP(session);
 
   session->next_crypto = crypto_new();
   if (session->next_crypto == NULL) {
@@ -87,7 +86,7 @@ ssh_session ssh_new(void) {
   }
 
   session->alive = 0;
-  session->auth_methods = 0;
+  session->auth.supported_methods = 0;
   ssh_set_blocking(session, 1);
   session->maxchannel = FIRST_CHANNEL;
 
@@ -272,7 +271,7 @@ void ssh_free(ssh_session session) {
   session->agent_state = NULL;
 
   SAFE_FREE(session->remote_ip);
-  SAFE_FREE(session->auth_auto_state);
+  SAFE_FREE(session->auth.auto_state);
   SAFE_FREE(session->serverbanner);
   SAFE_FREE(session->clientbanner);
   SAFE_FREE(session->banner);
@@ -287,6 +286,7 @@ void ssh_free(ssh_session session) {
   SAFE_FREE(session->opts.ProxyCommand);
   SAFE_FREE(session->opts.gss_server_identity);
   SAFE_FREE(session->opts.gss_client_identity);
+  SAFE_FREE(session->opts.pubkey_accepted_types);
 
   for (i = 0; i < 10; i++) {
       if (session->opts.wanted_methods[i]) {
@@ -372,6 +372,10 @@ const char* ssh_get_kex_algo(ssh_session session) {
             return "diffie-hellman-group1-sha1";
         case SSH_KEX_DH_GROUP14_SHA1:
             return "diffie-hellman-group14-sha1";
+        case SSH_KEX_DH_GROUP16_SHA512:
+            return "diffie-hellman-group16-sha512";
+        case SSH_KEX_DH_GROUP18_SHA512:
+            return "diffie-hellman-group18-sha512";
         case SSH_KEX_ECDH_SHA2_NISTP256:
             return "ecdh-sha2-nistp256";
         case SSH_KEX_ECDH_SHA2_NISTP384:

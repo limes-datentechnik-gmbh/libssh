@@ -30,6 +30,9 @@
 #ifdef HAVE_LIBMBEDCRYPTO
 #include <mbedtls/md.h>
 
+static mbedtls_entropy_context ssh_mbedtls_entropy;
+static mbedtls_ctr_drbg_context ssh_mbedtls_ctr_drbg;
+
 struct ssh_mac_ctx_struct {
     enum ssh_mac_e mac_type;
     mbedtls_md_context_t ctx;
@@ -169,7 +172,7 @@ void evp_update(EVPCTX ctx, const void *data, unsigned long len)
 void evp_final(EVPCTX ctx, unsigned char *md, unsigned int *mdlen)
 {
     *mdlen = mbedtls_md_get_size(ctx->md_info);
-    mbedtls_md_hmac_finish(ctx, md);
+    mbedtls_md_finish(ctx, md);
     mbedtls_md_free(ctx);
     SAFE_FREE(ctx);
 }
@@ -997,6 +1000,11 @@ int ssh_mbedtls_random(void *where, int len, int strong)
     }
 
     return !rc;
+}
+
+mbedtls_ctr_drbg_context *ssh_get_mbedtls_ctr_drbg_context(void)
+{
+    return &ssh_mbedtls_ctr_drbg;
 }
 
 void ssh_crypto_finalize(void)

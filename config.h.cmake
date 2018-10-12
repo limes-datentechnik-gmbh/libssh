@@ -89,6 +89,9 @@
 /* Define to 1 if you have DSA */
 #cmakedefine HAVE_DSA 1
 
+/* Define to 1 if you have gl_flags as a glob_t sturct member */
+#cmakedefine HAVE_GLOB_GL_FLAGS_MEMBER 1
+
 /*************************** FUNCTIONS ***************************/
 
 /* Define to 1 if you have the `EVP_aes128_ctr' function. */
@@ -129,6 +132,9 @@
 
 /* Define to 1 if you have the `strncpy' function. */
 #cmakedefine HAVE_STRNCPY 1
+
+/* Define to 1 if you have the `strndup' function. */
+#cmakedefine HAVE_STRNDUP 1
 
 /* Define to 1 if you have the `cfmakeraw' function. */
 #cmakedefine HAVE_CFMAKERAW 1

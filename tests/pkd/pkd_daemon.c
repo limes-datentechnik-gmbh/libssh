@@ -72,7 +72,8 @@ static void pkd_sighandler(int signum) {
     (void) signum;
 }
 
-static int pkd_init_libssh() {
+static int pkd_init_libssh(void)
+{
     int rc = ssh_threads_set_callbacks(ssh_threads_get_pthread());
     return (rc == SSH_OK) ? 0 : 1;
 }
@@ -115,7 +116,8 @@ out:
     return rc;
 }
 
-static int pkd_accept_fd() {
+static int pkd_accept_fd(void)
+{
     int fd = -1;
     struct sockaddr_in addr;
     socklen_t len = sizeof(addr);
@@ -435,6 +437,9 @@ static void *pkd_main(void *args) {
         pkderr("sigaction: %d\n", rc);
         goto out;
     }
+
+    /* Ignore SIGPIPE */
+    signal(SIGPIPE, SIG_IGN);
 
     rc = pkd_init_libssh();
     if (rc != 0) {
