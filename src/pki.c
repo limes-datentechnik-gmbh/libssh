@@ -208,6 +208,9 @@ ssh_key_signature_to_char(enum ssh_keytypes_e type,
         return ssh_key_type_to_char(type);
     }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     switch (hash_type) {
     case SSH_DIGEST_SHA256:
         return "rsa-sha2-256";
@@ -218,6 +221,9 @@ ssh_key_signature_to_char(enum ssh_keytypes_e type,
     default:
         return NULL;
     }
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
     /* We should never reach this */
     return NULL;

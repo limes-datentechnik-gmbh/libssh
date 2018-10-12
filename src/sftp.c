@@ -297,10 +297,16 @@ int sftp_server_init(sftp_session sftp){
 
   rc = ssh_buffer_pack(reply, "dssss",
                       LIBSFTP_VERSION,
+                      #ifdef __EBCDIC__
+                      #pragma convert("ISO8859-1")
+                      #endif
                       "posix-rename@openssh.com",
                       "1",
                       "hardlink@openssh.com",
                       "1");
+                      #ifdef __EBCDIC__
+                      #pragma convert(pop)
+                      #endif
   if (rc != SSH_OK) {
     ssh_set_error_oom(session);
     ssh_buffer_free(reply);
@@ -3296,6 +3302,7 @@ sftp_statvfs_t sftp_statvfs(sftp_session sftp, const char *path)
     int rc;
     char* pathCpy;
     char* pathConv;
+    const char* feature;
 
     if (sftp == NULL)
         return NULL;
@@ -3332,16 +3339,18 @@ sftp_statvfs_t sftp_statvfs(sftp_session sftp, const char *path)
 
     id = sftp_get_new_id(sftp);
 
+    #ifdef __EBCDIC__
+    #pragma convert("ISO8859-1")
+    #endif
+    feature = "statvfs@openssh.com";
+    #ifdef __EBCDIC__
+    #pragma convert(pop)
+    #endif
+
     rc = ssh_buffer_pack(buffer,
                          "dss",
                          id,
-                         #ifdef __EBCDIC__
-                         #pragma convert("ISO8859-1")
-                         #endif
-                         "statvfs@openssh.com",
-                         #ifdef __EBCDIC__
-                         #pragma convert(pop)
-                         #endif
+                         feature,
                          pathConv);
     SAFE_FREE(pathConv);
     if (rc != SSH_OK) {
@@ -3493,6 +3502,7 @@ sftp_statvfs_t sftp_fstatvfs(sftp_file file)
     ssh_buffer buffer;
     uint32_t id;
     int rc;
+    const char* feature;
 
     if (file == NULL) {
         return NULL;
@@ -3507,16 +3517,18 @@ sftp_statvfs_t sftp_fstatvfs(sftp_file file)
 
     id = sftp_get_new_id(sftp);
 
+    #ifdef __EBCDIC__
+    #pragma convert("ISO8859-1")
+    #endif
+    feature = "fstatvfs@openssh.com";
+    #ifdef __EBCDIC__
+    #pragma convert(pop)
+    #endif
+
     rc = ssh_buffer_pack(buffer,
                          "dsS",
                          id,
-                         #ifdef __EBCDIC__
-                         #pragma convert("ISO8859-1")
-                         #endif
-                         "fstatvfs@openssh.com",
-                         #ifdef __EBCDIC__
-                         #pragma convert(pop)
-                         #endif
+                         feature,
                          file->handle);
     if (rc < 0) {
         ssh_set_error_oom(sftp->session);

@@ -349,6 +349,9 @@ SSH_PACKET_CALLBACK(ssh_packet_ext_info)
             return SSH_PACKET_USED;
         }
 
+        name = ssh_string_utf8_to_local(session, name);
+        value = ssh_string_utf8_to_local(session, value);
+
         cmp = strcmp(name, "server-sig-algs");
         if (cmp == 0) {
             /* TODO check for NULL bytes */
