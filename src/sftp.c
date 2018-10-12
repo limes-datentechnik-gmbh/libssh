@@ -2092,7 +2092,7 @@ int sftp_async_readmsg(sftp_file file, sftp_message* msgHdl, uint32_t id) {
       }
       len = ntohl(len);
       // verify if there is enough data in the buffer (buffer overflow protection)
-      if (msg->payload->pos + len < len || msg->payload->pos + len > msg->payload->used) {
+      if (ssh_buffer_validate_length(msg->payload, len) != SSH_OK) {
         ssh_set_error(sftp->session, SSH_FATAL,
             "Received invalid DATA packet from sftp server (length field mismatch)");
         return SSH_ERROR;
