@@ -177,16 +177,19 @@ static int callback_receive_banner(const void *data, size_t len, void *user)
  */
 int ssh_send_banner(ssh_session session, int server)
 {
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
     const char *banner = CLIENT_BANNER_SSH2;
     const char *terminator = "\r\n";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
     /* The maximum banner length is 255 for SSH2 */
     char buffer[256] = {0};
     size_t len;
     int rc = SSH_ERROR;
 
-#ifdef __EBCDIC__
-#pragma convert("ISO8859-1")
-#endif
     if (server == 1) {
         if (session->opts.custombanner == NULL){
             len = strlen(banner);
@@ -200,15 +203,18 @@ int ssh_send_banner(ssh_session session, int server)
             if(session->serverbanner == NULL) {
                 goto end;
             }
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
             snprintf(session->serverbanner,
                      len + 8 + 1,
                      "SSH-2.0-%s",
                      session->opts.custombanner);
-        }
-
 #ifdef __EBCDIC__
 #pragma convert(pop)
 #endif
+        }
+
         snprintf(buffer,
                  sizeof(buffer),
                  "%s%s",
