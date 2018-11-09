@@ -293,6 +293,14 @@ ssh_pki_openssh_import(const char *text_key,
         SSH_LOG(SSH_LOG_WARN, "Not an OpenSSH private key (unpack error)");
         goto out;
     }
+#ifdef __EBCDIC__
+    if (magic != NULL)
+       ssh_string_to_ebcdic(magic, magic, strlen(magic));
+    if (ciphername != NULL)
+       ssh_string_to_ebcdic(ciphername, ciphername, strlen(ciphername));
+    if (magic != NULL)
+       ssh_string_to_ebcdic(kdfname, kdfname, strlen(kdfname));
+#endif
     cmp = strncmp(magic, OPENSSH_AUTH_MAGIC, strlen(OPENSSH_AUTH_MAGIC));
     if (cmp != 0){
         SSH_LOG(SSH_LOG_WARN, "Not an OpenSSH private key (bad magic)");
