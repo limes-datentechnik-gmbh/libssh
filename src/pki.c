@@ -272,6 +272,18 @@ static enum ssh_digest_e ssh_key_hash_from_name(const char *name)
         return SSH_DIGEST_AUTO;
     }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+    // On EBCDIC, compare in Latin-1 first
+    if (strcmp(name, "ssh-rsa") == 0) {
+        return SSH_DIGEST_SHA1;
+    } else if (strcmp(name, "rsa-sha2-256") == 0) {
+        return SSH_DIGEST_SHA256;
+    } else if (strcmp(name, "rsa-sha2-512") == 0) {
+        return SSH_DIGEST_SHA512;
+    }
+#pragma convert(pop)
+#endif
     if (strcmp(name, "ssh-rsa") == 0) {
         return SSH_DIGEST_SHA1;
     } else if (strcmp(name, "rsa-sha2-256") == 0) {
@@ -374,6 +386,15 @@ enum ssh_keytypes_e ssh_key_type_from_signature_name(const char *name) {
         return SSH_KEYTYPE_UNKNOWN;
     }
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+    // On EBCDIC, compare in Latin-1 first
+    if ((strcmp(name, "rsa-sha2-256") == 0) ||
+        (strcmp(name, "rsa-sha2-512") == 0)) {
+        return SSH_KEYTYPE_RSA;
+    }
+#pragma convert(pop)
+#endif
     if ((strcmp(name, "rsa-sha2-256") == 0) ||
         (strcmp(name, "rsa-sha2-512") == 0)) {
         return SSH_KEYTYPE_RSA;
