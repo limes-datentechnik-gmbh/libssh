@@ -295,13 +295,14 @@ static enum ssh_digest_e ssh_key_hash_from_name(const char *name)
     /* we do not care for others now */
     return SSH_DIGEST_AUTO;
 }
+
 /**
  * @brief Checks the given key against the configured allowed
  * public key algorithm types
  *
  * @param[in] session The SSH session
- * @parma[in] type    The key algorithm to check
- * @returns           1 if the key algorithm is allowed 0 otherwise
+ * @param[in] type    The key algorithm to check
+ * @returns           1 if the key algorithm is allowed, 0 otherwise
  */
 int ssh_key_algorithm_allowed(ssh_session session, const char *type)
 {
@@ -314,6 +315,43 @@ int ssh_key_algorithm_allowed(ssh_session session, const char *type)
 
     SSH_LOG(SSH_LOG_DEBUG, "Checking %s with list <%s>", type, allowed_list);
     return ssh_match_group(allowed_list, type);
+}
+
+/**
+ * @brief Checks the given host key against the configured allowed
+ * host key algorithm types
+ *
+ * @param[in] session The SSH session
+ * @param[in] type    The host key algorithm to check
+ * @returns           1 if the host key algorithm is allowed, 0 otherwise
+ */
+int ssh_hostkey_algorithm_allowed(ssh_session session, const char *type)
+{
+    const char *allowed_types;
+
+    allowed_types = session->opts.wanted_methods[SSH_HOSTKEYS];
+    if (allowed_types == NULL) {
+       return 0; /* should never get here */
+    }
+
+    if (ssh_match_group(allowed_types, type)) {
+        return 1;
+    }
+    if (strcmp(type, "ssh-rsa") == 0) {
+        /*
+         * If rsa-sha2 hostkey algo is used, the server returns ssh-rsa as
+         * host key type. Hence, we need to check if one of the rsa-sha2
+         * variants is in the allowed hostkey types list.
+         */
+        if (ssh_match_group(allowed_types, "rsa-sha2-256")) {
+            return 1;
+        }
+        if (ssh_match_group(allowed_types, "rsa-sha2-512")) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 /**

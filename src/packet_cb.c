@@ -207,12 +207,10 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
         str = strdup(server_key->type_c);
         if (str == NULL) {
             ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
-            ssh_key_free(server_key);
-            return -1;
+            goto error;
         }
         ssh_string_to_ebcdic(str, str, strlen(str));
-        if(!ssh_match_group(session->opts.wanted_methods[SSH_HOSTKEYS],
-                            str)) {
+        if (!ssh_hostkey_algorithm_allowed(session, str)) {
             ssh_set_error(session,
                           SSH_FATAL,
                           "Public key from server (%s) doesn't match user "
@@ -220,20 +218,18 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
                           str,
                           session->opts.wanted_methods[SSH_HOSTKEYS]);
             free(str);
-            ssh_key_free(server_key);
-            return -1;
+            goto error;
         }
         free(str);
 #else
-        if(!ssh_match_group(session->opts.wanted_methods[SSH_HOSTKEYS],
-                            server_key->type_c)) {
+        if (!ssh_hostkey_algorithm_allowed(session, server_key->type_c)) {
             ssh_set_error(session,
                           SSH_FATAL,
                           "Public key from server (%s) doesn't match user "
                           "preference (%s)",
                           server_key->type_c,
                           session->opts.wanted_methods[SSH_HOSTKEYS]);
-            return -1;
+            goto error;
         }
 #endif /* __EBCDIC */
     }
