@@ -46,8 +46,14 @@ typedef struct chacha_ctx chacha_ctx;
         a = PLUS(a,b); d = ROTATE(XOR(d,a), 8); \
         c = PLUS(c,d); b = ROTATE(XOR(b,c), 7);
 
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
 static const char sigma[16] = "expand 32-byte k";
 static const char tau[16] = "expand 16-byte k";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 
 void
 chacha_keysetup(chacha_ctx *x,const uint8_t *k,uint32_t kbits)
