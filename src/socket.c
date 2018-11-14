@@ -269,17 +269,13 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p,
             if (p != NULL) {
                 ssh_poll_remove_events(p, POLLIN);
             }
-
             if (s->callbacks != NULL && s->callbacks->exception != NULL) {
                 s->callbacks->exception(SSH_SOCKET_EXCEPTION_ERROR,
                                         s->last_errno,
                                         s->callbacks->userdata);
 
-                /* p may have been freed, so don't use it
-                 * anymore in this function */
-                p = NULL;
-                return -2;
             }
+            return -2;
         }
         if (nread == 0) {
             if (p != NULL) {
@@ -289,12 +285,8 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p,
                 s->callbacks->exception(SSH_SOCKET_EXCEPTION_EOF,
                                         0,
                                         s->callbacks->userdata);
-
-                /* p may have been freed, so don't use it
-                 * anymore in this function */
-                p = NULL;
-                return -2;
             }
+            return -2;
         }
 
         if (s->session->socket_counter != NULL) {
