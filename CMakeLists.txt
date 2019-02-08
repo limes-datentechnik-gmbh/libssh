@@ -22,7 +22,7 @@ set(APPLICATION_NAME ${PROJECT_NAME})
 #     Increment AGE. Set REVISION to 0
 #   If the source code was changed, but there were no interface changes:
 #     Increment REVISION.
-set(LIBRARY_VERSION "4.7.0")
+set(LIBRARY_VERSION "4.7.4")
 set(LIBRARY_SOVERSION "4")
 
 # where to look first for cmake modules, before ${CMAKE_ROOT}/Modules/ is checked
@@ -38,6 +38,9 @@ include(CompilerChecks.cmake)
 # disallow in-source build
 include(MacroEnsureOutOfSourceBuild)
 macro_ensure_out_of_source_build("${PROJECT_NAME} requires an out of source build. Please create a separate build directory and run 'cmake /path/to/${PROJECT_NAME} [options]' there.")
+
+# Copy library files to a lib sub-directory
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
 # search for libraries
 if (WITH_ZLIB)
@@ -66,6 +69,10 @@ else (WITH_GCRYPT)
     endif (NOT GCRYPT_FOUND)
   endif (NOT OPENSSL_FOUND)
 endif(WITH_GCRYPT)
+
+if (UNIT_TESTING)
+    find_package(CMocka REQUIRED)
+endif ()
 
 # Find out if we have threading available
 set(CMAKE_THREAD_PREFER_PTHREADS ON)
@@ -116,11 +123,22 @@ install(
 )
 endif (UNIX)
 
-# cmake config files
+# CMake config files
+include(CMakePackageConfigHelpers)
+
 set(LIBSSH_LIBRARY_NAME ${CMAKE_SHARED_LIBRARY_PREFIX}ssh${CMAKE_SHARED_LIBRARY_SUFFIX})
 
-configure_file(${PROJECT_NAME}-config.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake @ONLY)
-configure_file(${PROJECT_NAME}-config-version.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake @ONLY)
+# libssh-config-version.cmake
+write_basic_package_version_file(libssh-config-version.cmake
+                                 VERSION ${PROJECT_VERSION}
+                                 COMPATIBILITY SameMajorVersion)
+
+# libssh-config.cmake
+configure_package_config_file(${PROJECT_NAME}-config.cmake.in
+                              ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
+                              INSTALL_DESTINATION ${CMAKE_INSTALL_DIR}/${PROJECT_NAME}
+                              PATH_VARS INCLUDE_INSTALL_DIR LIB_INSTALL_DIR)
+
 install(
     FILES
         ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
@@ -131,18 +149,13 @@ install(
         devel
 )
 
-
-# in tree build settings
-configure_file(libssh-build-tree-settings.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/libssh-build-tree-settings.cmake @ONLY)
-
 if (WITH_EXAMPLES)
     add_subdirectory(examples)
 endif (WITH_EXAMPLES)
 
 if (UNIT_TESTING)
-  find_package(CMocka REQUIRED)
-  include(AddCMockaTest)
-  add_subdirectory(tests)
+    include(AddCMockaTest)
+    add_subdirectory(tests)
 endif (UNIT_TESTING)
 
 ### SOURCE PACKAGE
@@ -210,10 +223,12 @@ message(STATUS "libnacl support: ${WITH_NACL}")
 message(STATUS "SFTP support: ${WITH_SFTP}")
 message(STATUS "Server support : ${WITH_SERVER}")
 message(STATUS "GSSAPI support : ${WITH_GSSAPI}")
+message(STATUS "GEX support : ${WITH_GEX}")
 message(STATUS "Pcap debugging support : ${WITH_PCAP}")
 message(STATUS "With static library: ${WITH_STATIC_LIB}")
 message(STATUS "Unit testing: ${UNIT_TESTING}")
 message(STATUS "Client code testing: ${CLIENT_TESTING}")
+message(STATUS "Blowfish cipher support: ${WITH_BLOWFISH_CIPHER}")
 set(_SERVER_TESTING OFF)
 if (WITH_SERVER)
     set(_SERVER_TESTING ${SERVER_TESTING})

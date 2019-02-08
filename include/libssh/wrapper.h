@@ -47,7 +47,8 @@ enum ssh_hmac_e {
   SSH_HMAC_SHA384,
   SSH_HMAC_SHA512,
   SSH_HMAC_MD5,
-  SSH_HMAC_AEAD_POLY1305
+  SSH_HMAC_AEAD_POLY1305,
+  SSH_HMAC_AEAD_GCM
 };
 
 enum ssh_des_e {
@@ -58,6 +59,12 @@ enum ssh_des_e {
 struct ssh_hmac_struct {
   const char* name;
   enum ssh_hmac_e hmac_type;
+};
+
+enum ssh_crypto_direction_e {
+    SSH_DIRECTION_IN = 1,
+    SSH_DIRECTION_OUT = 2,
+    SSH_DIRECTION_BOTH = 3,
 };
 
 struct ssh_cipher_struct;

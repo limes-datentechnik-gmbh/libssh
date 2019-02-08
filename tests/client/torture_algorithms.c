@@ -34,7 +34,7 @@
 
 static int sshd_setup(void **state)
 {
-    torture_setup_sshd_server(state);
+    torture_setup_sshd_server(state, false);
 
     return 0;
 }
@@ -89,9 +89,6 @@ static void test_algorithm(ssh_session session,
         100, 127, 128
     };
     unsigned int i;
-
-    int verbosity = torture_libssh_verbosity();
-    ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
 
     if (kex != NULL) {
         rc = ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, kex);
@@ -240,6 +237,20 @@ static void torture_algorithms_aes256_ctr_hmac_sha2_512(void **state) {
     test_algorithm(s->ssh.session, NULL/*kex*/, "aes256-ctr", "hmac-sha2-512");
 }
 
+static void torture_algorithms_aes128_gcm(void **state)
+{
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session, NULL/*kex*/, "aes128-gcm@openssh.com", NULL);
+}
+
+static void torture_algorithms_aes256_gcm(void **state)
+{
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session, NULL/*kex*/, "aes256-gcm@openssh.com", NULL);
+}
+
 static void torture_algorithms_3des_cbc_hmac_sha1(void **state) {
     struct torture_state *s = *state;
 
@@ -258,6 +269,7 @@ static void torture_algorithms_3des_cbc_hmac_sha2_512(void **state) {
     test_algorithm(s->ssh.session, NULL/*kex*/, "3des-cbc", "hmac-sha2-512");
 }
 
+#ifdef WITH_BLOWFISH_CIPHER
 #if ((OPENSSH_VERSION_MAJOR == 7 && OPENSSH_VERSION_MINOR < 6) || OPENSSH_VERSION_MAJOR <= 6)
 static void torture_algorithms_blowfish_cbc_hmac_sha1(void **state) {
     struct torture_state *s = *state;
@@ -277,6 +289,7 @@ static void torture_algorithms_blowfish_cbc_hmac_sha2_512(void **state) {
     test_algorithm(s->ssh.session, NULL/*kex*/, "blowfish-cbc", "hmac-sha2-512");
 }
 #endif
+#endif /* WITH_BLOWFISH_CIPHER */
 
 static void torture_algorithms_chacha20_poly1305(void **state)
 {
@@ -407,6 +420,46 @@ static void torture_algorithms_dh_group1(void **state) {
     test_algorithm(s->ssh.session, "diffie-hellman-group1-sha1", NULL/*cipher*/, NULL/*hmac*/);
 }
 
+static void torture_algorithms_dh_group14(void **state) {
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session, "diffie-hellman-group14-sha1", NULL/*cipher*/, NULL/*hmac*/);
+}
+
+static void torture_algorithms_dh_group16(void **state) {
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session, "diffie-hellman-group16-sha512", NULL/*cipher*/, NULL/*hmac*/);
+}
+
+static void torture_algorithms_dh_group18(void **state) {
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session, "diffie-hellman-group18-sha512", NULL/*cipher*/, NULL/*hmac*/);
+}
+
+#ifdef WITH_GEX
+static void torture_algorithms_dh_gex_sha1(void **state)
+{
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session,
+                   "diffie-hellman-group-exchange-sha1",
+                   NULL,  /* cipher */
+                   NULL); /* hmac */
+}
+
+static void torture_algorithms_dh_gex_sha256(void **state)
+{
+    struct torture_state *s = *state;
+
+    test_algorithm(s->ssh.session,
+                   "diffie-hellman-group-exchange-sha256",
+                   NULL, /* cipher */
+                   NULL); /* hmac */
+}
+#endif /* WITH_GEX */
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -464,6 +517,12 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_algorithms_aes256_ctr_hmac_sha2_512,
                                         session_setup,
                                         session_teardown),
+        cmocka_unit_test_setup_teardown(torture_algorithms_aes128_gcm,
+                                        session_setup,
+                                        session_teardown),
+        cmocka_unit_test_setup_teardown(torture_algorithms_aes256_gcm,
+                                        session_setup,
+                                        session_teardown),
         cmocka_unit_test_setup_teardown(torture_algorithms_3des_cbc_hmac_sha1,
                                         session_setup,
                                         session_teardown),
@@ -473,6 +532,7 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_algorithms_3des_cbc_hmac_sha2_512,
                                         session_setup,
                                         session_teardown),
+#ifdef WITH_BLOWFISH_CIPHER
 #if ((OPENSSH_VERSION_MAJOR == 7 && OPENSSH_VERSION_MINOR < 6) || OPENSSH_VERSION_MAJOR <= 6)
         cmocka_unit_test_setup_teardown(torture_algorithms_blowfish_cbc_hmac_sha1,
                                         session_setup,
@@ -484,6 +544,7 @@ int torture_run_tests(void) {
                                         session_setup,
                                         session_teardown),
 #endif
+#endif /* WITH_BLOWFISH_CIPHER */
         cmocka_unit_test_setup_teardown(torture_algorithms_chacha20_poly1305,
                                         session_setup,
                                         session_teardown),
@@ -496,6 +557,23 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_algorithms_dh_group1,
                                         session_setup,
                                         session_teardown),
+        cmocka_unit_test_setup_teardown(torture_algorithms_dh_group14,
+                                        session_setup,
+                                        session_teardown),
+        cmocka_unit_test_setup_teardown(torture_algorithms_dh_group16,
+                                        session_setup,
+                                        session_teardown),
+        cmocka_unit_test_setup_teardown(torture_algorithms_dh_group18,
+                                        session_setup,
+                                        session_teardown),
+#ifdef WITH_GEX
+        cmocka_unit_test_setup_teardown(torture_algorithms_dh_gex_sha1,
+                                        session_setup,
+                                        session_teardown),
+        cmocka_unit_test_setup_teardown(torture_algorithms_dh_gex_sha256,
+                                        session_setup,
+                                        session_teardown),
+#endif /* WITH_GEX */
 #if ((OPENSSH_VERSION_MAJOR == 7 && OPENSSH_VERSION_MINOR >= 3) || OPENSSH_VERSION_MAJOR > 7)
         cmocka_unit_test_setup_teardown(torture_algorithms_ecdh_curve25519_sha256,
                                         session_setup,

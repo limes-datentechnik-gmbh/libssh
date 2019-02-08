@@ -91,6 +91,10 @@ static int ssh_auth_response_termination(void *user) {
         case SSH_AUTH_STATE_GSSAPI_REQUEST_SENT:
         case SSH_AUTH_STATE_GSSAPI_TOKEN:
         case SSH_AUTH_STATE_GSSAPI_MIC_SENT:
+        case SSH_AUTH_STATE_PUBKEY_AUTH_SENT:
+        case SSH_AUTH_STATE_PUBKEY_OFFER_SENT:
+        case SSH_AUTH_STATE_PASSWORD_AUTH_SENT:
+        case SSH_AUTH_STATE_AUTH_NONE_SENT:
             return 0;
         default:
             return 1;
@@ -173,6 +177,10 @@ static int ssh_userauth_get_response(ssh_session session) {
         case SSH_AUTH_STATE_GSSAPI_REQUEST_SENT:
         case SSH_AUTH_STATE_GSSAPI_TOKEN:
         case SSH_AUTH_STATE_GSSAPI_MIC_SENT:
+        case SSH_AUTH_STATE_PUBKEY_OFFER_SENT:
+        case SSH_AUTH_STATE_PUBKEY_AUTH_SENT:
+        case SSH_AUTH_STATE_PASSWORD_AUTH_SENT:
+        case SSH_AUTH_STATE_AUTH_NONE_SENT:
         case SSH_AUTH_STATE_NONE:
             /* not reached */
             rc = SSH_AUTH_ERROR;
@@ -284,7 +292,10 @@ end:
  *
  * It is also used to communicate the new to the upper levels.
  */
-SSH_PACKET_CALLBACK(ssh_packet_userauth_success) {
+SSH_PACKET_CALLBACK(ssh_packet_userauth_success)
+{
+  struct ssh_crypto_struct *crypto = NULL;
+
   (void)packet;
   (void)type;
   (void)user;
@@ -296,13 +307,16 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_success) {
   session->session_state = SSH_SESSION_STATE_AUTHENTICATED;
   session->flags |= SSH_SESSION_FLAG_AUTHENTICATED;
 
-  if (session->current_crypto && session->current_crypto->delayed_compress_out) {
+  crypto = ssh_packet_get_current_crypto(session, SSH_DIRECTION_OUT);
+  if (crypto != NULL && crypto->delayed_compress_out) {
       SSH_LOG(SSH_LOG_DEBUG, "Enabling delayed compression OUT");
-      session->current_crypto->do_compress_out = 1;
+      crypto->do_compress_out = 1;
   }
-  if (session->current_crypto && session->current_crypto->delayed_compress_in) {
+
+  crypto = ssh_packet_get_current_crypto(session, SSH_DIRECTION_IN);
+  if (crypto != NULL && crypto->delayed_compress_in) {
       SSH_LOG(SSH_LOG_DEBUG, "Enabling delayed compression IN");
-      session->current_crypto->do_compress_in = 1;
+      crypto->do_compress_in = 1;
   }
 
     /* Reset errors by previous authentication methods. */
@@ -322,24 +336,30 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_success) {
 SSH_PACKET_CALLBACK(ssh_packet_userauth_pk_ok) {
     int rc;
 
-  SSH_LOG(SSH_LOG_TRACE, "Received SSH_USERAUTH_PK_OK/INFO_REQUEST/GSSAPI_RESPONSE");
-
-  if (session->auth.state == SSH_AUTH_STATE_KBDINT_SENT) {
-    /* Assuming we are in keyboard-interactive context */
     SSH_LOG(SSH_LOG_TRACE,
-            "keyboard-interactive context, assuming SSH_USERAUTH_INFO_REQUEST");
-    rc = ssh_packet_userauth_info_request(session,type,packet,user);
-#ifdef WITH_GSSAPI
-  } else if (session->auth.state == SSH_AUTH_STATE_GSSAPI_REQUEST_SENT) {
-    rc = ssh_packet_userauth_gssapi_response(session, type, packet, user);
-#endif
-  } else {
-    session->auth.state = SSH_AUTH_STATE_PK_OK;
-    SSH_LOG(SSH_LOG_TRACE, "Assuming SSH_USERAUTH_PK_OK");
-    rc = SSH_PACKET_USED;
-  }
+            "Received SSH_USERAUTH_PK_OK/INFO_REQUEST/GSSAPI_RESPONSE");
 
-  return rc;
+    if (session->auth.state == SSH_AUTH_STATE_KBDINT_SENT) {
+        /* Assuming we are in keyboard-interactive context */
+        SSH_LOG(SSH_LOG_TRACE,
+                "keyboard-interactive context, "
+                "assuming SSH_USERAUTH_INFO_REQUEST");
+        rc = ssh_packet_userauth_info_request(session,type,packet,user);
+#ifdef WITH_GSSAPI
+    } else if (session->auth.state == SSH_AUTH_STATE_GSSAPI_REQUEST_SENT) {
+        rc = ssh_packet_userauth_gssapi_response(session, type, packet, user);
+#endif
+    } else if (session->auth.state == SSH_AUTH_STATE_PUBKEY_OFFER_SENT) {
+        session->auth.state = SSH_AUTH_STATE_PK_OK;
+        SSH_LOG(SSH_LOG_TRACE, "Assuming SSH_USERAUTH_PK_OK");
+        rc = SSH_PACKET_USED;
+    } else {
+        session->auth.state = SSH_AUTH_STATE_ERROR;
+        SSH_LOG(SSH_LOG_TRACE, "SSH_USERAUTH_PK_OK received in wrong state");
+        rc = SSH_PACKET_USED;
+    }
+
+    return rc;
 }
 
 /**
@@ -453,7 +473,7 @@ int ssh_userauth_none(ssh_session session, const char *username) {
     }
 
     session->auth.current_method = SSH_AUTH_METHOD_NONE;
-    session->auth.state = SSH_AUTH_STATE_NONE;
+    session->auth.state = SSH_AUTH_STATE_AUTH_NONE_SENT;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_NONE;
     rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
@@ -618,7 +638,7 @@ int ssh_userauth_try_publickey(ssh_session session,
     ssh_string_free(pubkey_s);
 
     session->auth.current_method = SSH_AUTH_METHOD_PUBLICKEY;
-    session->auth.state = SSH_AUTH_STATE_NONE;
+    session->auth.state = SSH_AUTH_STATE_PUBKEY_OFFER_SENT;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_OFFER_PUBKEY;
     rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
@@ -791,7 +811,7 @@ int ssh_userauth_publickey(ssh_session session,
     }
 
     session->auth.current_method = SSH_AUTH_METHOD_PUBLICKEY;
-    session->auth.state = SSH_AUTH_STATE_NONE;
+    session->auth.state = SSH_AUTH_STATE_PUBKEY_AUTH_SENT;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_PUBKEY;
     rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
@@ -912,7 +932,7 @@ static int ssh_userauth_agent_publickey(ssh_session session,
     }
 
     session->auth.current_method = SSH_AUTH_METHOD_PUBLICKEY;
-    session->auth.state = SSH_AUTH_STATE_NONE;
+    session->auth.state = SSH_AUTH_STATE_PUBKEY_AUTH_SENT;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_AGENT;
     rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {
@@ -1425,7 +1445,7 @@ int ssh_userauth_password(ssh_session session,
     }
 
     session->auth.current_method = SSH_AUTH_METHOD_PASSWORD;
-    session->auth.state = SSH_AUTH_STATE_NONE;
+    session->auth.state = SSH_AUTH_STATE_PASSWORD_AUTH_SENT;
     session->pending_call_state = SSH_PENDING_CALL_AUTH_PASSWORD;
     rc = ssh_packet_send(session);
     if (rc == SSH_ERROR) {

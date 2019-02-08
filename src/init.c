@@ -143,7 +143,7 @@ void libssh_constructor(void)
  * If the library is already initialized, increments the _ssh_initialized
  * counter and return the error code cached in _ssh_init_ret.
  *
- * @returns             0 on success, -1 if an error occured.
+ * @returns             SSH_OK on success, SSH_ERROR if an error occurred.
  */
 int ssh_init(void) {
     return _ssh_init(0);
@@ -188,7 +188,7 @@ _ret:
  *
  * This function is automatically called when the library is unloaded.
  *
- * @returns             0 on succes, -1 if an error occured.
+ * @returns             SSH_OK on success, SSH_ERROR if an error occurred.
  *
  */
 void libssh_destructor(void)
@@ -224,7 +224,7 @@ int ssh_finalize(void) {
 
 #ifdef _WIN32
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(LIBSSH_STATIC)
 /* Library constructor and destructor */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL,
                     DWORD fdwReason,
@@ -249,7 +249,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL,
 
     return TRUE;
 }
-#endif /* _MSC_VER */
+#endif /* _MSC_VER && !LIBSSH_STATIC */
 
 #endif /* _WIN32 */
 

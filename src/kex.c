@@ -31,6 +31,9 @@
 #include "libssh/priv.h"
 #include "libssh/buffer.h"
 #include "libssh/dh.h"
+#ifdef WITH_GEX
+#include "libssh/dh-gex.h"
+#endif /* WITH_GEX */
 #include "libssh/kex.h"
 #include "libssh/session.h"
 #include "libssh/ssh2.h"
@@ -38,32 +41,48 @@
 #include "libssh/curve25519.h"
 #include "libssh/knownhosts.h"
 #include "libssh/misc.h"
+#include "libssh/pki.h"
+#include "libssh/bignum.h"
+
+#ifdef WITH_BLOWFISH_CIPHER
+# if defined(HAVE_OPENSSL_BLOWFISH_H) || defined(HAVE_LIBGCRYPT) || defined(HAVE_LIBMBEDCRYPTO)
+#  define BLOWFISH "blowfish-cbc,"
+# else
+#  define BLOWFISH ""
+# endif
+#else
+# define BLOWFISH ""
+#endif
 
 #ifdef HAVE_LIBGCRYPT
-# define BLOWFISH "blowfish-cbc,"
-# define AES "aes256-ctr,aes192-ctr,aes128-ctr,aes256-cbc,aes192-cbc,aes128-cbc,"
+# define AES "aes256-gcm@openssh.com,aes128-gcm@openssh.com," \
+             "aes256-ctr,aes192-ctr,aes128-ctr," \
+             "aes256-cbc,aes192-cbc,aes128-cbc,"
 # define DES "3des-cbc"
 # define DES_SUPPORTED "3des-cbc"
 
-#elif defined HAVE_LIBMBEDCRYPTO
-# define BLOWFISH "blowfish-cbc,"
-# define AES "aes256-ctr,aes192-ctr,aes128-ctr,aes256-cbc,aes192-cbc,aes128-cbc,"
+#elif defined(HAVE_LIBMBEDCRYPTO)
+# ifdef MBEDTLS_GCM_C
+#  define GCM "aes256-gcm@openssh.com,aes128-gcm@openssh.com,"
+# else
+#  define GCM ""
+# endif /* MBEDTLS_GCM_C */
+# define AES GCM "aes256-ctr,aes192-ctr,aes128-ctr," \
+             "aes256-cbc,aes192-cbc,aes128-cbc,"
 # define DES "3des-cbc"
 # define DES_SUPPORTED "3des-cbc"
 
 #elif defined(HAVE_LIBCRYPTO)
-
-# ifdef HAVE_OPENSSL_BLOWFISH_H
-#  define BLOWFISH "blowfish-cbc,"
-# else /* HAVE_OPENSSL_BLOWFISH_H */
-#  define BLOWFISH ""
-# endif /* HAVE_OPENSSL_BLOWFISH_H */
-
 # ifdef HAVE_OPENSSL_AES_H
+#  ifdef HAVE_OPENSSL_EVP_AES_GCM
+#   define GCM "aes256-gcm@openssh.com,aes128-gcm@openssh.com,"
+#  else
+#   define GCM ""
+#  endif /* HAVE_OPENSSL_EVP_AES_GCM */
 #  ifdef BROKEN_AES_CTR
-#   define AES "aes256-cbc,aes192-cbc,aes128-cbc,"
+#   define AES GCM "aes256-cbc,aes192-cbc,aes128-cbc,"
 #  else /* BROKEN_AES_CTR */
-#   define AES "aes256-ctr,aes192-ctr,aes128-ctr,aes256-cbc,aes192-cbc,aes128-cbc,"
+#   define AES GCM "aes256-ctr,aes192-ctr,aes128-ctr,aes256-cbc,aes192-cbc,aes128-cbc,"
 #  endif /* BROKEN_AES_CTR */
 # else /* HAVE_OPENSSL_AES_H */
 #  define AES ""
@@ -97,9 +116,25 @@
 #define ECDH ""
 #endif
 
+#ifdef WITH_GEX
+#define GEX_SHA256 "diffie-hellman-group-exchange-sha256,"
+#define GEX_SHA1 "diffie-hellman-group-exchange-sha1,"
+#else
+#define GEX_SHA256
+#define GEX_SHA1
+#endif /* WITH_GEX */
+
 #define CHACHA20 "chacha20-poly1305@openssh.com,"
 
-#define KEY_EXCHANGE CURVE25519 ECDH "diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1"
+#define KEY_EXCHANGE \
+    CURVE25519 \
+    ECDH \
+    "diffie-hellman-group18-sha512,diffie-hellman-group16-sha512," \
+    GEX_SHA256 \
+    "diffie-hellman-group14-sha1,diffie-hellman-group1-sha1"
+#define KEY_EXCHANGE_SUPPORTED \
+    GEX_SHA1 \
+    KEY_EXCHANGE
 #define KEX_METHODS_SIZE 10
 
 /* RFC 8308 */
@@ -122,7 +157,7 @@ static const char *default_methods[] = {
 
 /* NOTE: This is a fixed API and the index is defined by ssh_kex_types_e */
 static const char *supported_methods[] = {
-  KEY_EXCHANGE,
+  KEY_EXCHANGE_SUPPORTED,
   PUBLIC_KEY_ALGORITHMS,
   CHACHA20 AES BLOWFISH DES_SUPPORTED,
   CHACHA20 AES BLOWFISH DES_SUPPORTED,
@@ -415,11 +450,13 @@ out:
     return is_wrong;
 }
 
-SSH_PACKET_CALLBACK(ssh_packet_kexinit){
+SSH_PACKET_CALLBACK(ssh_packet_kexinit)
+{
     int i, ok;
-    int server_kex=session->server;
+    int server_kex = session->server;
     ssh_string str = NULL;
     char *strings[KEX_METHODS_SIZE] = {0};
+    char *rsa_sig_ext = NULL;
     int rc = SSH_ERROR;
 
     uint8_t first_kex_packet_follows = 0;
@@ -428,9 +465,9 @@ SSH_PACKET_CALLBACK(ssh_packet_kexinit){
     (void)type;
     (void)user;
 
-    if (session->session_state == SSH_SESSION_STATE_AUTHENTICATED){
-        SSH_LOG(SSH_LOG_WARNING, "Other side initiating key re-exchange");
-    } else if(session->session_state != SSH_SESSION_STATE_INITIAL_KEX){
+    if (session->session_state == SSH_SESSION_STATE_AUTHENTICATED) {
+        SSH_LOG(SSH_LOG_INFO, "Initiating key re-exchange");
+    } else if (session->session_state != SSH_SESSION_STATE_INITIAL_KEX) {
         ssh_set_error(session,SSH_FATAL,"SSH_KEXINIT received in wrong state");
         goto error;
     }
@@ -529,13 +566,52 @@ SSH_PACKET_CALLBACK(ssh_packet_kexinit){
         ok = ssh_match_group(session->next_crypto->client_kex.methods[SSH_KEX],
                              KEX_EXTENSION_CLIENT);
         if (ok) {
+            const char *hostkeys = NULL;
+
+            /* The client supports extension negotiation */
+            session->extensions |= SSH_EXT_NEGOTIATION;
             /*
-             * Enable all the supported extensions and when the time comes
-             * (after NEWKEYS) send them to the client.
+             * RFC 8332 Section 3.1: Use for Server Authentication
+             * Check what algorithms were provided in the SSH_HOSTKEYS list
+             * by the client and enable the respective extensions to provide
+             * correct signature in the next packet if RSA is negotiated
              */
+            hostkeys = session->next_crypto->client_kex.methods[SSH_HOSTKEYS];
+            ok = ssh_match_group(hostkeys, "rsa-sha2-512");
+            if (ok) {
+                session->extensions |= SSH_EXT_SIG_RSA_SHA512;
+            }
+            ok = ssh_match_group(hostkeys, "rsa-sha2-256");
+            if (ok) {
+                session->extensions |= SSH_EXT_SIG_RSA_SHA256;
+            }
+
+            /*
+             * Ensure that the client preference is honored for the case
+             * both signature types are enabled.
+             */
+            if ((session->extensions & SSH_EXT_SIG_RSA_SHA256) &&
+                (session->extensions & SSH_EXT_SIG_RSA_SHA512)) {
+                session->extensions &= ~(SSH_EXT_SIG_RSA_SHA256 | SSH_EXT_SIG_RSA_SHA512);
+                rsa_sig_ext = ssh_find_matching("rsa-sha2-512,rsa-sha2-256",
+                                                session->next_crypto->client_kex.methods[SSH_HOSTKEYS]);
+                if (rsa_sig_ext == NULL) {
+                    goto error; /* should never happen */
+                } else if (strcmp(rsa_sig_ext, "rsa-sha2-512") == 0) {
+                    session->extensions |= SSH_EXT_SIG_RSA_SHA512;
+                } else if (strcmp(rsa_sig_ext, "rsa-sha2-256") == 0) {
+                    session->extensions |= SSH_EXT_SIG_RSA_SHA256;
+                } else {
+                    SAFE_FREE(rsa_sig_ext);
+                    goto error; /* should never happen */
+                }
+                SAFE_FREE(rsa_sig_ext);
+            }
+
             SSH_LOG(SSH_LOG_DEBUG, "The client supports extension "
-                    "negotiation: enabling all extensions");
-            session->extensions = SSH_EXT_ALL;
+                    "negotiation. Enabled signature algorithms: %s%s",
+                    session->extensions & SSH_EXT_SIG_RSA_SHA256 ? "SHA256" : "",
+                    session->extensions & SSH_EXT_SIG_RSA_SHA512 ? " SHA512" : "");
         }
 
         /*
@@ -552,6 +628,7 @@ SSH_PACKET_CALLBACK(ssh_packet_kexinit){
         }
     }
 
+    /* Note, that his overwrites authenticated state in case of rekeying */
     session->session_state = SSH_SESSION_STATE_KEXINIT_RECEIVED;
     session->dh_handshake_state = DH_STATE_INIT;
     session->ssh_connection_callback(session);
@@ -596,7 +673,7 @@ void ssh_list_kex(struct ssh_kex_struct *kex) {
  * @returns a cstring containing a comma-separated list of hostkey methods.
  *          NULL if no method matches
  */
-static char *ssh_client_select_hostkeys(ssh_session session)
+char *ssh_client_select_hostkeys(ssh_session session)
 {
     char methods_buffer[128]={0};
     char tail_buffer[128]={0};
@@ -606,6 +683,8 @@ static char *ssh_client_select_hostkeys(ssh_session session)
         "ecdsa-sha2-nistp521",
         "ecdsa-sha2-nistp384",
         "ecdsa-sha2-nistp256",
+        "rsa-sha2-512",
+        "rsa-sha2-256",
         "ssh-rsa",
 #ifdef HAVE_DSA
         "ssh-dss",
@@ -631,29 +710,30 @@ static char *ssh_client_select_hostkeys(ssh_session session)
 
     for (i = 0; preferred_hostkeys[i] != NULL; ++i) {
         bool found = false;
+        /* This is a signature type: We list also the SHA2 extensions */
+        enum ssh_keytypes_e base_preferred =
+            ssh_key_type_from_signature_name(preferred_hostkeys[i]);
 
         for (it = ssh_list_get_iterator(algo_list);
              it != NULL;
              it = it->next) {
             const char *algo = ssh_iterator_value(const char *, it);
-            int cmp;
-            int ok;
+            /* This is always key type so we do not have to care for the
+             * SHA2 extension */
+            enum ssh_keytypes_e base_algo = ssh_key_type_from_name(algo);
 
-            cmp = strcmp(preferred_hostkeys[i], algo);
-            if (cmp == 0) {
-                ok = ssh_verify_existing_algo(SSH_HOSTKEYS, algo);
-                if (ok) {
-                    if (needcomma) {
-                        strncat(methods_buffer,
-                                ",",
-                                sizeof(methods_buffer) - strlen(methods_buffer) - 1);
-                    }
+            if (base_preferred == base_algo) {
+                /* Matching the keys already verified it is a known type */
+                if (needcomma) {
                     strncat(methods_buffer,
-                            algo,
+                            ",",
                             sizeof(methods_buffer) - strlen(methods_buffer) - 1);
-                    needcomma = 1;
-                    found = true;
                 }
+                strncat(methods_buffer,
+                        preferred_hostkeys[i],
+                        sizeof(methods_buffer) - strlen(methods_buffer) - 1);
+                needcomma = 1;
+                found = true;
             }
         }
         /* Collect the rest of the algorithms in other buffer, that will
@@ -715,10 +795,10 @@ int ssh_set_client_kex(ssh_session session)
 
     memset(client->methods, 0, KEX_METHODS_SIZE * sizeof(char **));
     /* first check if we have specific host key methods */
-    if(session->opts.wanted_methods[SSH_HOSTKEYS] == NULL){
+    if (session->opts.wanted_methods[SSH_HOSTKEYS] == NULL) {
     	/* Only if no override */
     	session->opts.wanted_methods[SSH_HOSTKEYS] =
-    			ssh_client_select_hostkeys(session);
+            ssh_client_select_hostkeys(session);
     }
 
     for (i = 0; i < KEX_METHODS_SIZE; i++) {
@@ -730,6 +810,11 @@ int ssh_set_client_kex(ssh_session session)
             ssh_set_error_oom(session);
             return SSH_ERROR;
         }
+    }
+
+    /* For rekeying, skip the extension negotiation */
+    if (session->flags & SSH_SESSION_FLAG_AUTHENTICATED) {
+        return SSH_OK;
     }
 
     /* Here we append  ext-info-c  to the list of kex algorithms */
@@ -787,6 +872,12 @@ int ssh_kex_select_methods (ssh_session session){
       session->next_crypto->kex_type=SSH_KEX_DH_GROUP16_SHA512;
     } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "diffie-hellman-group18-sha512") == 0){
       session->next_crypto->kex_type=SSH_KEX_DH_GROUP18_SHA512;
+#ifdef WITH_GEX
+    } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "diffie-hellman-group-exchange-sha1") == 0){
+      session->next_crypto->kex_type=SSH_KEX_DH_GEX_SHA1;
+    } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "diffie-hellman-group-exchange-sha256") == 0){
+        session->next_crypto->kex_type=SSH_KEX_DH_GEX_SHA256;
+#endif /* WITH_GEX */
     } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "ecdh-sha2-nistp256") == 0){
       session->next_crypto->kex_type=SSH_KEX_ECDH_SHA2_NISTP256;
     } else if(strcmp(session->next_crypto->kex_methods[SSH_KEX], "ecdh-sha2-nistp384") == 0){
@@ -866,6 +957,7 @@ int ssh_send_kex(ssh_session session, int server_kex) {
     return -1;
   }
 
+  SSH_LOG(SSH_LOG_PACKET, "SSH_MSG_KEXINIT sent");
   return 0;
 error:
   ssh_buffer_reinit(session->out_buffer);
@@ -873,6 +965,57 @@ error:
   ssh_string_free(str);
 
   return -1;
+}
+
+/*
+ * Key re-exchange (rekey) is triggered by this function.
+ * It can not be called again after the rekey is initialized!
+ */
+int ssh_send_rekex(ssh_session session)
+{
+    int rc;
+
+    if (session->dh_handshake_state != DH_STATE_FINISHED) {
+        /* Rekey/Key exchange is already in progress */
+        SSH_LOG(SSH_LOG_PACKET, "Attempting rekey in bad state");
+        return SSH_ERROR;
+    }
+
+    if (session->current_crypto == NULL) {
+        /* No current crypto used -- can not exchange it */
+        SSH_LOG(SSH_LOG_PACKET, "No crypto to rekey");
+        return SSH_ERROR;
+    }
+
+    if (session->client) {
+        rc = ssh_set_client_kex(session);
+        if (rc != SSH_OK) {
+            SSH_LOG(SSH_LOG_PACKET, "Failed to set client kex");
+            return rc;
+        }
+    } else {
+#ifdef WITH_SERVER
+        rc = server_set_kex(session);
+        if (rc == SSH_ERROR) {
+            SSH_LOG(SSH_LOG_PACKET, "Failed to set server kex");
+            return rc;
+        }
+#else
+        SSH_LOG(SSH_LOG_PACKET, "Invalid session state.");
+        return SSH_ERROR;
+#endif /* WITH_SERVER */
+    }
+
+    session->dh_handshake_state = DH_STATE_INIT;
+    rc = ssh_send_kex(session, session->server);
+    if (rc < 0) {
+        SSH_LOG(SSH_LOG_PACKET, "Failed to send kex");
+        return rc;
+    }
+
+    /* Reset the handshake state */
+    session->dh_handshake_state = DH_STATE_INIT_SENT;
+    return SSH_OK;
 }
 
 /* returns 1 if at least one of the name algos is in the default algorithms table */
@@ -901,4 +1044,523 @@ char *ssh_keep_known_algos(enum ssh_kex_types_e algo, const char *list)
     }
 
     return ssh_find_all_matching(supported_methods[algo], list);
+}
+
+int ssh_make_sessionid(ssh_session session)
+{
+    ssh_string num = NULL;
+    ssh_buffer server_hash = NULL;
+    ssh_buffer client_hash = NULL;
+    ssh_buffer buf = NULL;
+    ssh_string server_pubkey_blob = NULL;
+    int rc = SSH_ERROR;
+
+    buf = ssh_buffer_new();
+    if (buf == NULL) {
+        return rc;
+    }
+
+    rc = ssh_buffer_pack(buf,
+                         "ss",
+                         session->clientbanner,
+                         session->serverbanner);
+    if (rc == SSH_ERROR) {
+        goto error;
+    }
+
+    if (session->client) {
+        server_hash = session->in_hashbuf;
+        client_hash = session->out_hashbuf;
+    } else {
+        server_hash = session->out_hashbuf;
+        client_hash = session->in_hashbuf;
+    }
+
+    /*
+     * Handle the two final fields for the KEXINIT message (RFC 4253 7.1):
+     *
+     *      boolean      first_kex_packet_follows
+     *      uint32       0 (reserved for future extension)
+     */
+    rc = ssh_buffer_add_u8(server_hash, 0);
+    if (rc < 0) {
+        goto error;
+    }
+    rc = ssh_buffer_add_u32(server_hash, 0);
+    if (rc < 0) {
+        goto error;
+    }
+
+    /* These fields are handled for the server case in ssh_packet_kexinit. */
+    if (session->client) {
+        rc = ssh_buffer_add_u8(client_hash, 0);
+        if (rc < 0) {
+            goto error;
+        }
+        rc = ssh_buffer_add_u32(client_hash, 0);
+        if (rc < 0) {
+            goto error;
+        }
+    }
+
+    rc = ssh_dh_get_next_server_publickey_blob(session, &server_pubkey_blob);
+    if (rc != SSH_OK) {
+        goto error;
+    }
+
+    rc = ssh_buffer_pack(buf,
+                         "dPdPS",
+                         ssh_buffer_get_len(client_hash),
+                         ssh_buffer_get_len(client_hash),
+                         ssh_buffer_get(client_hash),
+                         ssh_buffer_get_len(server_hash),
+                         ssh_buffer_get_len(server_hash),
+                         ssh_buffer_get(server_hash),
+                         server_pubkey_blob);
+    ssh_string_free(server_pubkey_blob);
+    if(rc != SSH_OK){
+        goto error;
+    }
+
+    switch(session->next_crypto->kex_type) {
+    case SSH_KEX_DH_GROUP1_SHA1:
+    case SSH_KEX_DH_GROUP14_SHA1:
+    case SSH_KEX_DH_GROUP16_SHA512:
+    case SSH_KEX_DH_GROUP18_SHA512:
+        rc = ssh_buffer_pack(buf,
+                             "BB",
+                             session->next_crypto->e,
+                             session->next_crypto->f);
+        if (rc != SSH_OK) {
+            goto error;
+        }
+        break;
+#ifdef WITH_GEX
+    case SSH_KEX_DH_GEX_SHA1:
+    case SSH_KEX_DH_GEX_SHA256:
+        rc = ssh_buffer_pack(buf,
+                    "dddBBBB",
+                    session->next_crypto->dh_pmin,
+                    session->next_crypto->dh_pn,
+                    session->next_crypto->dh_pmax,
+                    session->next_crypto->p,
+                    session->next_crypto->g,
+                    session->next_crypto->e,
+                    session->next_crypto->f);
+        if (rc != SSH_OK) {
+            goto error;
+        }
+        break;
+#endif /* WITH_GEX */
+#ifdef HAVE_ECDH
+    case SSH_KEX_ECDH_SHA2_NISTP256:
+    case SSH_KEX_ECDH_SHA2_NISTP384:
+    case SSH_KEX_ECDH_SHA2_NISTP521:
+        if (session->next_crypto->ecdh_client_pubkey == NULL ||
+            session->next_crypto->ecdh_server_pubkey == NULL) {
+            SSH_LOG(SSH_LOG_WARNING, "ECDH parameted missing");
+            goto error;
+        }
+        rc = ssh_buffer_pack(buf,
+                             "SS",
+                             session->next_crypto->ecdh_client_pubkey,
+                             session->next_crypto->ecdh_server_pubkey);
+        if (rc != SSH_OK) {
+            goto error;
+        }
+        break;
+#endif
+#ifdef HAVE_CURVE25519
+    case SSH_KEX_CURVE25519_SHA256:
+    case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
+        rc = ssh_buffer_pack(buf,
+                             "dPdP",
+                             CURVE25519_PUBKEY_SIZE,
+                             (size_t)CURVE25519_PUBKEY_SIZE, session->next_crypto->curve25519_client_pubkey,
+                             CURVE25519_PUBKEY_SIZE,
+                             (size_t)CURVE25519_PUBKEY_SIZE, session->next_crypto->curve25519_server_pubkey);
+
+        if (rc != SSH_OK) {
+            goto error;
+        }
+        break;
+#endif
+    }
+    rc = ssh_buffer_pack(buf, "B", session->next_crypto->k);
+    if (rc != SSH_OK) {
+        goto error;
+    }
+
+#ifdef DEBUG_CRYPTO
+    ssh_print_hexa("hash buffer", ssh_buffer_get(buf), ssh_buffer_get_len(buf));
+#endif
+
+    switch (session->next_crypto->kex_type) {
+    case SSH_KEX_DH_GROUP1_SHA1:
+    case SSH_KEX_DH_GROUP14_SHA1:
+#ifdef WITH_GEX
+    case SSH_KEX_DH_GEX_SHA1:
+#endif /* WITH_GEX */
+        session->next_crypto->digest_len = SHA_DIGEST_LENGTH;
+        session->next_crypto->mac_type = SSH_MAC_SHA1;
+        session->next_crypto->secret_hash = malloc(session->next_crypto->digest_len);
+        if (session->next_crypto->secret_hash == NULL) {
+            ssh_set_error_oom(session);
+            goto error;
+        }
+        sha1(ssh_buffer_get(buf), ssh_buffer_get_len(buf),
+                                   session->next_crypto->secret_hash);
+        break;
+    case SSH_KEX_ECDH_SHA2_NISTP256:
+    case SSH_KEX_CURVE25519_SHA256:
+    case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
+#ifdef WITH_GEX
+    case SSH_KEX_DH_GEX_SHA256:
+#endif /* WITH_GEX */
+        session->next_crypto->digest_len = SHA256_DIGEST_LENGTH;
+        session->next_crypto->mac_type = SSH_MAC_SHA256;
+        session->next_crypto->secret_hash = malloc(session->next_crypto->digest_len);
+        if (session->next_crypto->secret_hash == NULL) {
+            ssh_set_error_oom(session);
+            goto error;
+        }
+        sha256(ssh_buffer_get(buf), ssh_buffer_get_len(buf),
+                                     session->next_crypto->secret_hash);
+        break;
+    case SSH_KEX_ECDH_SHA2_NISTP384:
+        session->next_crypto->digest_len = SHA384_DIGEST_LENGTH;
+        session->next_crypto->mac_type = SSH_MAC_SHA384;
+        session->next_crypto->secret_hash = malloc(session->next_crypto->digest_len);
+        if (session->next_crypto->secret_hash == NULL) {
+            ssh_set_error_oom(session);
+            goto error;
+        }
+        sha384(ssh_buffer_get(buf), ssh_buffer_get_len(buf),
+                                     session->next_crypto->secret_hash);
+        break;
+    case SSH_KEX_DH_GROUP16_SHA512:
+    case SSH_KEX_DH_GROUP18_SHA512:
+    case SSH_KEX_ECDH_SHA2_NISTP521:
+        session->next_crypto->digest_len = SHA512_DIGEST_LENGTH;
+        session->next_crypto->mac_type = SSH_MAC_SHA512;
+        session->next_crypto->secret_hash = malloc(session->next_crypto->digest_len);
+        if (session->next_crypto->secret_hash == NULL) {
+            ssh_set_error_oom(session);
+            goto error;
+        }
+        sha512(ssh_buffer_get(buf),
+               ssh_buffer_get_len(buf),
+               session->next_crypto->secret_hash);
+        break;
+    }
+    /* During the first kex, secret hash and session ID are equal. However, after
+     * a key re-exchange, a new secret hash is calculated. This hash will not replace
+     * but complement existing session id.
+     */
+    if (!session->next_crypto->session_id) {
+        session->next_crypto->session_id = malloc(session->next_crypto->digest_len);
+        if (session->next_crypto->session_id == NULL) {
+            ssh_set_error_oom(session);
+            goto error;
+        }
+        memcpy(session->next_crypto->session_id, session->next_crypto->secret_hash,
+                session->next_crypto->digest_len);
+    }
+#ifdef DEBUG_CRYPTO
+    printf("Session hash: \n");
+    ssh_print_hexa("secret hash", session->next_crypto->secret_hash, session->next_crypto->digest_len);
+    ssh_print_hexa("session id", session->next_crypto->session_id, session->next_crypto->digest_len);
+#endif
+
+    rc = SSH_OK;
+error:
+    ssh_buffer_free(buf);
+    ssh_buffer_free(client_hash);
+    ssh_buffer_free(server_hash);
+
+    session->in_hashbuf = NULL;
+    session->out_hashbuf = NULL;
+
+    ssh_string_free(num);
+
+    return rc;
+}
+
+int ssh_hashbufout_add_cookie(ssh_session session)
+{
+    int rc;
+
+    session->out_hashbuf = ssh_buffer_new();
+    if (session->out_hashbuf == NULL) {
+        return -1;
+    }
+
+    rc = ssh_buffer_allocate_size(session->out_hashbuf,
+            sizeof(uint8_t) + 16);
+    if (rc < 0) {
+        ssh_buffer_reinit(session->out_hashbuf);
+        return -1;
+    }
+
+    if (ssh_buffer_add_u8(session->out_hashbuf, 20) < 0) {
+        ssh_buffer_reinit(session->out_hashbuf);
+        return -1;
+    }
+
+    if (session->server) {
+        if (ssh_buffer_add_data(session->out_hashbuf,
+                    session->next_crypto->server_kex.cookie, 16) < 0) {
+            ssh_buffer_reinit(session->out_hashbuf);
+            return -1;
+        }
+    } else {
+        if (ssh_buffer_add_data(session->out_hashbuf,
+                    session->next_crypto->client_kex.cookie, 16) < 0) {
+            ssh_buffer_reinit(session->out_hashbuf);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int ssh_hashbufin_add_cookie(ssh_session session, unsigned char *cookie)
+{
+    int rc;
+
+    session->in_hashbuf = ssh_buffer_new();
+    if (session->in_hashbuf == NULL) {
+        return -1;
+    }
+
+    rc = ssh_buffer_allocate_size(session->in_hashbuf,
+            sizeof(uint8_t) + 20 + 16);
+    if (rc < 0) {
+        ssh_buffer_reinit(session->in_hashbuf);
+        return -1;
+    }
+
+    if (ssh_buffer_add_u8(session->in_hashbuf, 20) < 0) {
+        ssh_buffer_reinit(session->in_hashbuf);
+        return -1;
+    }
+    if (ssh_buffer_add_data(session->in_hashbuf,cookie, 16) < 0) {
+        ssh_buffer_reinit(session->in_hashbuf);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int generate_one_key(ssh_string k,
+                            struct ssh_crypto_struct *crypto,
+                            unsigned char **output,
+                            char letter,
+                            size_t requested_size)
+{
+    ssh_mac_ctx ctx;
+    unsigned char *tmp;
+    size_t size = crypto->digest_len;
+    ctx = ssh_mac_ctx_init(crypto->mac_type);
+
+    if (ctx == NULL) {
+        return -1;
+    }
+
+    ssh_mac_update(ctx, k, ssh_string_len(k) + 4);
+    ssh_mac_update(ctx, crypto->secret_hash, crypto->digest_len);
+    ssh_mac_update(ctx, &letter, 1);
+    ssh_mac_update(ctx, crypto->session_id, crypto->digest_len);
+    ssh_mac_final(*output, ctx);
+
+    while(requested_size > size) {
+        tmp = realloc(*output, size + crypto->digest_len);
+        if (tmp == NULL) {
+            return -1;
+        }
+        *output = tmp;
+
+        ctx = ssh_mac_ctx_init(crypto->mac_type);
+        if (ctx == NULL) {
+            return -1;
+        }
+        ssh_mac_update(ctx, k, ssh_string_len(k) + 4);
+        ssh_mac_update(ctx,
+                       crypto->secret_hash,
+                       crypto->digest_len);
+        ssh_mac_update(ctx, tmp, size);
+        ssh_mac_final(tmp + size, ctx);
+        size += crypto->digest_len;
+    }
+
+    return 0;
+}
+
+int ssh_generate_session_keys(ssh_session session)
+{
+    ssh_string k_string = NULL;
+    struct ssh_crypto_struct *crypto = session->next_crypto;
+    int rc = -1;
+
+    k_string = ssh_make_bignum_string(crypto->k);
+    if (k_string == NULL) {
+        ssh_set_error_oom(session);
+        goto error;
+    }
+
+    crypto->encryptIV = malloc(crypto->digest_len);
+    crypto->decryptIV = malloc(crypto->digest_len);
+    crypto->encryptkey = malloc(crypto->digest_len);
+    crypto->decryptkey = malloc(crypto->digest_len);
+    crypto->encryptMAC = malloc(crypto->digest_len);
+    crypto->decryptMAC = malloc(crypto->digest_len);
+    if (crypto->encryptIV == NULL ||
+        crypto->decryptIV == NULL ||
+        crypto->encryptkey == NULL || crypto->decryptkey == NULL ||
+        crypto->encryptMAC == NULL || crypto->decryptMAC == NULL){
+        ssh_set_error_oom(session);
+        goto error;
+    }
+
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
+    /* IV */
+    if (session->client) {
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->encryptIV,
+                              'A',
+                              crypto->digest_len);
+        if (rc < 0) {
+            goto error;
+        }
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->decryptIV,
+                              'B',
+                              crypto->digest_len);
+        if (rc < 0) {
+            goto error;
+        }
+    } else {
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->decryptIV,
+                              'A',
+                              crypto->digest_len);
+        if (rc < 0) {
+            goto error;
+        }
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->encryptIV,
+                              'B',
+                              crypto->digest_len);
+        if (rc < 0) {
+            goto error;
+        }
+    }
+    if (session->client) {
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->encryptkey,
+                              'C',
+                              crypto->out_cipher->keysize / 8);
+        if (rc < 0) {
+            goto error;
+        }
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->decryptkey,
+                              'D',
+                              crypto->in_cipher->keysize / 8);
+        if (rc < 0) {
+            goto error;
+        }
+    } else {
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->decryptkey,
+                              'C',
+                              crypto->in_cipher->keysize / 8);
+        if (rc < 0) {
+            goto error;
+        }
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->encryptkey,
+                              'D',
+                              crypto->out_cipher->keysize / 8);
+        if (rc < 0) {
+            goto error;
+        }
+    }
+
+    if(session->client) {
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->encryptMAC,
+                              'E',
+                              hmac_digest_len(crypto->out_hmac));
+        if (rc < 0) {
+            goto error;
+        }
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->decryptMAC,
+                              'F',
+                              hmac_digest_len(crypto->in_hmac));
+        if (rc < 0) {
+            goto error;
+        }
+    } else {
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->decryptMAC,
+                              'E',
+                              hmac_digest_len(crypto->in_hmac));
+        if (rc < 0) {
+            goto error;
+        }
+        rc = generate_one_key(k_string,
+                              crypto,
+                              &crypto->encryptMAC,
+                              'F',
+                              hmac_digest_len(crypto->out_hmac));
+        if (rc < 0) {
+            goto error;
+        }
+    }
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
+
+#ifdef DEBUG_CRYPTO
+    ssh_print_hexa("Encrypt IV",
+                   crypto->encryptIV,
+                   crypto->digest_len);
+    ssh_print_hexa("Decrypt IV",
+                   crypto->decryptIV,
+                   crypto->digest_len);
+    ssh_print_hexa("Encryption key",
+                   crypto->encryptkey,
+                   crypto->out_cipher->keysize / 8);
+    ssh_print_hexa("Decryption key",
+                   crypto->decryptkey,
+                   crypto->in_cipher->keysize / 8);
+    ssh_print_hexa("Encryption MAC",
+                   crypto->encryptMAC,
+                   hmac_digest_len(crypto->out_hmac));
+    ssh_print_hexa("Decryption MAC",
+                   crypto->decryptMAC,
+                   hmac_digest_len(crypto->in_hmac));
+#endif
+
+    rc = 0;
+error:
+    ssh_string_burn(k_string);
+    ssh_string_free(k_string);
+
+    return rc;
 }

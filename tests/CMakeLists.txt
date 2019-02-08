@@ -9,8 +9,6 @@ set(TORTURE_LIBRARY torture)
 include_directories(
   ${LIBSSH_PUBLIC_INCLUDE_DIRS}
   ${CMOCKA_INCLUDE_DIR}
-  ${OPENSSL_INCLUDE_DIR}
-  ${GCRYPT_INCLUDE_DIR}
   ${ZLIB_INCLUDE_DIR}
   ${CMAKE_BINARY_DIR}
   ${CMAKE_SOURCE_DIR}/src
@@ -84,7 +82,7 @@ if (CLIENT_TESTING)
 
     # chroot_wrapper
     add_library(chroot_wrapper SHARED chroot_wrapper.c)
-    set(CHROOT_WRAPPER_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}chroot_wrapper${CMAKE_SHARED_LIBRARY_SUFFIX})
+    set(CHROOT_WRAPPER_LIBRARY ${libssh_BINARY_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}chroot_wrapper${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(TEST_TARGET_LIBRARIES
         ${TEST_TARGET_LIBRARIES}
         chroot_wrapper
@@ -121,11 +119,17 @@ if (CLIENT_TESTING)
     file(COPY keys/id_rsa.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
     file(COPY keys/id_ecdsa DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
     file(COPY keys/id_ecdsa.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    file(COPY keys/id_ed25519 DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    file(COPY keys/id_ed25519.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
 
     # Allow to auth with bob his public keys on alice account
     configure_file(keys/id_rsa.pub ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys @ONLY)
     # append ECDSA public key
     file(READ keys/id_ecdsa.pub CONTENTS)
+    file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys "${CONTENTS}")
+
+    # append ed25519 public key
+    file(READ keys/id_ed25519.pub CONTENTS)
     file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys "${CONTENTS}")
 
     # Copy the signed key to an alternative directory in bob's homedir.
@@ -144,6 +148,7 @@ endif (WITH_BENCHMARKS)
 
 if (WITH_SERVER AND SERVER_TESTING)
     add_subdirectory(pkd)
+    add_subdirectory(server)
 endif (WITH_SERVER AND SERVER_TESTING)
 
 if (FUZZ_TESTING)

@@ -539,7 +539,7 @@ int pki_key_generate_rsa(ssh_key key, int parameter){
 
 int pki_key_generate_dss(ssh_key key, int parameter){
     int rc;
-#if OPENSSL_VERSION_NUMBER > 0x10100000L
+#if OPENSSL_VERSION_NUMBER > 0x00908000L
     key->dsa = DSA_new();
     if (key->dsa == NULL) {
         return SSH_ERROR;
@@ -581,7 +581,7 @@ int pki_key_generate_ecdsa(ssh_key key, int parameter) {
         case 384:
             nid = NID_secp384r1;
             break;
-        case 512:
+        case 521:
             nid = NID_secp521r1;
             break;
         case 256:
@@ -813,7 +813,7 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
         case SSH_KEYTYPE_UNKNOWN:
         default:
             BIO_free(mem);
-            SSH_LOG(SSH_LOG_WARN, "Unkown or invalid private key type %d", key->type);
+            SSH_LOG(SSH_LOG_WARN, "Unknown or invalid private key type %d", key->type);
             return NULL;
     }
 
@@ -939,7 +939,7 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
         case SSH_KEYTYPE_RSA_CERT01:
         case SSH_KEYTYPE_UNKNOWN:
             BIO_free(mem);
-            SSH_LOG(SSH_LOG_WARN, "Unkown or invalid private key type %d", type);
+            SSH_LOG(SSH_LOG_WARN, "Unknown or invalid private key type %d", type);
             return NULL;
     }
 
@@ -1061,7 +1061,7 @@ int pki_privkey_build_rsa(ssh_key key,
                           ssh_string n,
                           ssh_string e,
                           ssh_string d,
-                          ssh_string iqmp,
+                          UNUSED_PARAM(ssh_string iqmp),
                           ssh_string p,
                           ssh_string q)
 {
@@ -1623,6 +1623,14 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
     int rc;
     BIGNUM *pr = NULL, *ps = NULL;
 
+    if (type != pubkey->type) {
+        SSH_LOG(SSH_LOG_WARN,
+                "Incompatible public key provided (%d) expecting (%d)",
+                type,
+                pubkey->type);
+        return NULL;
+    }
+
     sig = ssh_signature_new();
     if (sig == NULL) {
         return NULL;
@@ -1630,7 +1638,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
 
     sig->type = type;
     sig->hash_type = hash_type;
-    sig->type_c = ssh_key_signature_to_char(type, hash_type);
+    sig->type_c = pubkey->type_c; /* for all types but RSA */
 
     len = ssh_string_len(sig_blob);
 
@@ -1672,6 +1680,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
 
             s = ssh_string_new(20);
             if (s == NULL) {
+                bignum_safe_free(pr);
                 ssh_signature_free(sig);
                 return NULL;
             }
@@ -1680,6 +1689,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
             ps = ssh_make_string_bn(s);
             ssh_string_free(s);
             if (ps == NULL) {
+                bignum_safe_free(pr);
                 ssh_signature_free(sig);
                 return NULL;
             }
@@ -1688,6 +1698,8 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
              * object */
             rc = DSA_SIG_set0(sig->dsa_sig, pr, ps);
             if (rc == 0) {
+                bignum_safe_free(ps);
+                bignum_safe_free(pr);
                 ssh_signature_free(sig);
                 return NULL;
             }
@@ -1696,6 +1708,10 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
         case SSH_KEYTYPE_RSA:
         case SSH_KEYTYPE_RSA1:
             sig = pki_signature_from_rsa_blob(pubkey, sig_blob, sig);
+            if (sig == NULL) {
+                return NULL;
+            }
+            sig->type_c = ssh_key_signature_to_char(type, hash_type);
             break;
         case SSH_KEYTYPE_ECDSA:
 #ifdef HAVE_OPENSSL_ECC
@@ -1748,6 +1764,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
                 rlen = ssh_buffer_get_len(b);
                 ssh_buffer_free(b);
                 if (s == NULL) {
+                    bignum_safe_free(pr);
                     ssh_signature_free(sig);
                     return NULL;
                 }
@@ -1760,6 +1777,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
                 ssh_string_burn(s);
                 ssh_string_free(s);
                 if (ps == NULL) {
+                    bignum_safe_free(pr);
                     ssh_signature_free(sig);
                     return NULL;
                 }
@@ -1768,6 +1786,8 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
                  * ECDSA signature object */
                 rc = ECDSA_SIG_set0(sig->ecdsa_sig, pr, ps);
                 if (rc == 0) {
+                    bignum_safe_free(ps);
+                    bignum_safe_free(pr);
                     ssh_signature_free(sig);
                     return NULL;
                 }
@@ -1810,7 +1830,15 @@ int pki_signature_verify(ssh_session session,
     int rc;
     int nid;
 
-    switch(key->type) {
+    if (key->type != sig->type) {
+        SSH_LOG(SSH_LOG_WARN,
+                "Can not verify %s signature with %s key",
+                sig->type_c,
+                key->type_c);
+        return SSH_ERROR;
+    }
+
+    switch (key->type) {
         case SSH_KEYTYPE_DSS:
             rc = DSA_do_verify(hash,
                                hlen,

@@ -29,6 +29,7 @@
 #ifndef _LIBSSH_PRIV_H
 #define _LIBSSH_PRIV_H
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -180,6 +181,10 @@ char *strndup(const char *s, size_t n);
 #  endif /* __WORDSIZE */
 # endif /* PRIu64 */
 
+# ifndef PRIu32
+#  define PRIu32 "u"
+# endif /* PRIu32 */
+
 # ifdef _MSC_VER
 #  include <stdio.h>
 #  include <stdarg.h> /* va_copy define check */
@@ -230,6 +235,13 @@ char *strndup(const char *s, size_t n);
 #    endif /* HAVE_VSNPRINTF */
 #   endif /* HAVE__VSNPRINTF */
 #  endif /* HAVE__VSNPRINTF_S */
+
+#  ifndef _SSIZE_T_DEFINED
+#   undef ssize_t
+#   include <BaseTsd.h>
+    typedef _W64 SSIZE_T ssize_t;
+#   define _SSIZE_T_DEFINED
+#  endif /* _SSIZE_T_DEFINED */
 
 # endif /* _MSC_VER */
 
@@ -480,6 +492,22 @@ void explicit_bzero(void *s, size_t n);
 #  define FALL_THROUGH
 # endif /* HAVE_FALLTHROUGH_ATTRIBUTE */
 #endif /* FALL_THROUGH */
+
+#ifndef __unused__
+# ifdef HAVE_UNUSED_ATTRIBUTE
+#  define __unused__ __attribute__((unused))
+# else /* HAVE_UNUSED_ATTRIBUTE */
+#  define __unused__
+# endif /* HAVE_UNUSED_ATTRIBUTE */
+#endif /* __unused__ */
+
+#ifndef UNUSED_PARAM
+#define UNUSED_PARAM(param) param __unused__
+#endif /* UNUSED_PARAM */
+
+#ifndef UNUSED_VAR
+#define UNUSED_VAR(var) __unused__ var
+#endif /* UNUSED_VAR */
 
 void ssh_agent_state_free(void *data);
 

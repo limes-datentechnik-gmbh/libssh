@@ -29,6 +29,8 @@
 
 #ifdef HAVE_LIBGCRYPT
 #include <gcrypt.h>
+#elif defined(HAVE_LIBMBEDCRYPTO)
+#include <mbedtls/gcm.h>
 #endif
 #include "libssh/wrapper.h"
 
@@ -48,11 +50,20 @@
 
 #define DIGEST_MAX_LEN 64
 
+#define AES_GCM_TAGLEN 16
+#define AES_GCM_IVLEN  12
+
 enum ssh_key_exchange_e {
   /* diffie-hellman-group1-sha1 */
   SSH_KEX_DH_GROUP1_SHA1=1,
   /* diffie-hellman-group14-sha1 */
   SSH_KEX_DH_GROUP14_SHA1,
+#ifdef WITH_GEX
+  /* diffie-hellman-group-exchange-sha1 */
+  SSH_KEX_DH_GEX_SHA1,
+  /* diffie-hellman-group-exchange-sha256 */
+  SSH_KEX_DH_GEX_SHA256,
+#endif /* WITH_GEX */
   /* ecdh-sha2-nistp256 */
   SSH_KEX_ECDH_SHA2_NISTP256,
   /* ecdh-sha2-nistp384 */
@@ -71,18 +82,28 @@ enum ssh_key_exchange_e {
 
 enum ssh_cipher_e {
     SSH_NO_CIPHER=0,
+#ifdef WITH_BLOWFISH_CIPHER
     SSH_BLOWFISH_CBC,
+#endif /* WITH_BLOWFISH_CIPHER */
     SSH_3DES_CBC,
     SSH_AES128_CBC,
     SSH_AES192_CBC,
     SSH_AES256_CBC,
     SSH_AES128_CTR,
     SSH_AES192_CTR,
-    SSH_AES256_CTR
+    SSH_AES256_CTR,
+    SSH_AEAD_AES128_GCM,
+    SSH_AEAD_AES256_GCM,
+    SSH_AEAD_CHACHA20_POLY1305
 };
 
 struct ssh_crypto_struct {
     bignum e,f,x,k,y;
+    bignum g, p;
+    int dh_group_is_mutable; /* do free group parameters */
+#ifdef WITH_GEX
+    size_t dh_pmin; int dh_pn; int dh_pmax; /* preferred group parameters */
+#endif /* WITH_GEX */
 #ifdef HAVE_ECDH
 #ifdef HAVE_OPENSSL_ECC
     EC_KEY *ecdh_privkey;
@@ -126,6 +147,7 @@ struct ssh_crypto_struct {
     char *kex_methods[SSH_KEX_METHODS];
     enum ssh_key_exchange_e kex_type;
     enum ssh_mac_e mac_type; /* Mac operations to use for key gen */
+    enum ssh_crypto_direction_e used; /* Is this crypto still used for either of directions? */
 };
 
 struct ssh_cipher_struct {
@@ -136,6 +158,7 @@ struct ssh_cipher_struct {
     size_t keylen; /* length of the key structure */
 #ifdef HAVE_LIBGCRYPT
     gcry_cipher_hd_t *key;
+    unsigned char last_iv[AES_GCM_IVLEN];
 #elif defined HAVE_LIBCRYPTO
     struct ssh_3des_key_schedule *des3_key;
     struct ssh_aes_key_schedule *aes_key;
@@ -145,17 +168,30 @@ struct ssh_cipher_struct {
     mbedtls_cipher_context_t encrypt_ctx;
     mbedtls_cipher_context_t decrypt_ctx;
     mbedtls_cipher_type_t type;
+#ifdef MBEDTLS_GCM_C
+    mbedtls_gcm_context gcm_ctx;
+    unsigned char last_iv[AES_GCM_IVLEN];
+#endif /* MBEDTLS_GCM_C */
 #endif
     struct chacha20_poly1305_keysched *chacha20_schedule;
     unsigned int keysize; /* bytes of key used. != keylen */
     size_t tag_size; /* overhead required for tag */
+    /* Counters for rekeying initialization */
+    uint32_t packets;
+    uint64_t blocks;
+    /* Rekeying limit for the cipher or manually enforced */
+    uint64_t max_blocks;
     /* sets the new key for immediate use */
     int (*set_encrypt_key)(struct ssh_cipher_struct *cipher, void *key, void *IV);
     int (*set_decrypt_key)(struct ssh_cipher_struct *cipher, void *key, void *IV);
-    void (*encrypt)(struct ssh_cipher_struct *cipher, void *in, void *out,
-        unsigned long len);
-    void (*decrypt)(struct ssh_cipher_struct *cipher, void *in, void *out,
-        unsigned long len);
+    void (*encrypt)(struct ssh_cipher_struct *cipher,
+                    void *in,
+                    void *out,
+                    size_t len);
+    void (*decrypt)(struct ssh_cipher_struct *cipher,
+                    void *in,
+                    void *out,
+                    size_t len);
     void (*aead_encrypt)(struct ssh_cipher_struct *cipher, void *in, void *out,
         size_t len, uint8_t *mac, uint64_t seq);
     int (*aead_decrypt_length)(struct ssh_cipher_struct *cipher, void *in,

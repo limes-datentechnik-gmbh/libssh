@@ -20,6 +20,8 @@
 
 #ifndef SESSION_H_
 #define SESSION_H_
+#include <stdbool.h>
+
 #include "libssh/priv.h"
 #include "libssh/kex.h"
 #include "libssh/packet.h"
@@ -27,6 +29,8 @@
 #include "libssh/auth.h"
 #include "libssh/channels.h"
 #include "libssh/poll.h"
+#include "libssh/config.h"
+#include "libssh/misc.h"
 
 /* These are the different states a SSH session can be into its life */
 enum ssh_session_state_e {
@@ -45,6 +49,8 @@ enum ssh_session_state_e {
 
 enum ssh_dh_state_e {
   DH_STATE_INIT=0,
+  DH_STATE_GROUP_SENT,
+  DH_STATE_REQUEST_SENT,
   DH_STATE_INIT_SENT,
   DH_STATE_NEWKEYS_SENT,
   DH_STATE_FINISHED
@@ -87,10 +93,11 @@ enum ssh_pending_call_e {
 #define SSH_OPT_FLAG_GSSAPI_AUTH 0x8
 
 /* extensions flags */
+/* negotiation enabled */
+#define SSH_EXT_NEGOTIATION     0x01
 /* server-sig-algs extension */
-#define SSH_EXT_SIG_RSA_SHA256  0x01
-#define SSH_EXT_SIG_RSA_SHA512  0x02
-#define SSH_EXT_ALL             SSH_EXT_SIG_RSA_SHA256 | SSH_EXT_SIG_RSA_SHA512
+#define SSH_EXT_SIG_RSA_SHA256  0x02
+#define SSH_EXT_SIG_RSA_SHA512  0x04
 
 /* members that are common to ssh_session and ssh_bind */
 struct ssh_common_struct {
@@ -112,6 +119,7 @@ struct ssh_session_struct {
     int openssh;
     uint32_t send_seq;
     uint32_t recv_seq;
+    struct ssh_timestamp last_rekey_time;
 
     int connected;
     /* !=0 when the user got a session handle */
@@ -132,6 +140,8 @@ struct ssh_session_struct {
     ssh_buffer in_buffer;
     PACKET in_packet;
     ssh_buffer out_buffer;
+    struct ssh_list *out_queue; /* This list is used for delaying packets
+                                   when rekeying is required */
 
     /* the states are used by the nonblocking stuff to remember */
     /* where it was before being interrupted */
@@ -166,8 +176,6 @@ struct ssh_session_struct {
 
     struct ssh_list *channels; /* linked list of channels */
     int maxchannel;
-    int exec_channel_opened; /* version 1 only. more
-                                info in channels1.c */
     ssh_agent agent; /* ssh agent */
 
 /* keyb interactive data */
@@ -223,6 +231,10 @@ struct ssh_session_struct {
         int nodelay;
         ssh_string_charconvert_func utf_to_local_func;
         ssh_string_charconvert_func local_to_utf_func;
+        bool config_processed;
+        uint8_t options_seen[SOC_MAX];
+        uint64_t rekey_data;
+        uint32_t rekey_time;
     } opts;
     /* counters */
     ssh_counter socket_counter;
@@ -236,8 +248,10 @@ struct ssh_session_struct {
  */
 typedef int (*ssh_termination_function)(void *user);
 int ssh_handle_packets(ssh_session session, int timeout);
-int ssh_handle_packets_termination(ssh_session session, int timeout,
-    ssh_termination_function fct, void *user);
+int ssh_handle_packets_termination(ssh_session session,
+                                   long timeout,
+                                   ssh_termination_function fct,
+                                   void *user);
 void ssh_socket_exception_callback(int code, int errno_code, void *user);
 
 #endif /* SESSION_H_ */

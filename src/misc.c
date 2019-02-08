@@ -213,47 +213,50 @@ int ssh_is_ipaddr(const char *str) {
 #define NSS_BUFLEN_PASSWD 4096
 #endif /* NSS_BUFLEN_PASSWD */
 
-char *ssh_get_user_home_dir(void) {
-  char *szPath = NULL;
-  struct passwd pwd;
-  struct passwd *pwdbuf;
-  char buf[NSS_BUFLEN_PASSWD] = {0};
-  int rc;
+char *ssh_get_user_home_dir(void)
+{
+    char *szPath = NULL;
+    struct passwd pwd;
+    struct passwd *pwdbuf = NULL;
+    char buf[NSS_BUFLEN_PASSWD] = {0};
+    int rc;
 
-  rc = getpwuid_r(getuid(), &pwd, buf, NSS_BUFLEN_PASSWD, &pwdbuf);
-  if (rc != 0) {
-      szPath = getenv("HOME");
-      if (szPath == NULL) {
-          return NULL;
-      }
-      snprintf(buf, sizeof(buf), "%s", szPath);
+    rc = getpwuid_r(getuid(), &pwd, buf, NSS_BUFLEN_PASSWD, &pwdbuf);
+    if (rc != 0 || pwdbuf == NULL ) {
+        szPath = getenv("HOME");
+        if (szPath == NULL) {
+            return NULL;
+        }
+        snprintf(buf, sizeof(buf), "%s", szPath);
 
-      return strdup(buf);
-  }
+        return strdup(buf);
+    }
 
-  szPath = strdup(pwd.pw_dir);
+    szPath = strdup(pwd.pw_dir);
 
-  return szPath;
+    return szPath;
 }
 
 /* we have read access on file */
-int ssh_file_readaccess_ok(const char *file) {
-  if (access(file, R_OK) < 0) {
-    return 0;
-  }
+int ssh_file_readaccess_ok(const char *file)
+{
+    if (access(file, R_OK) < 0) {
+        return 0;
+    }
 
-  return 1;
+    return 1;
 }
 
-char *ssh_get_local_username(void) {
+char *ssh_get_local_username(void)
+{
     struct passwd pwd;
-    struct passwd *pwdbuf;
+    struct passwd *pwdbuf = NULL;
     char buf[NSS_BUFLEN_PASSWD];
     char *name;
     int rc;
 
     rc = getpwuid_r(getuid(), &pwd, buf, NSS_BUFLEN_PASSWD, &pwdbuf);
-    if (rc != 0) {
+    if (rc != 0 || pwdbuf == NULL) {
         return NULL;
     }
 
@@ -463,6 +466,57 @@ char *ssh_hostport(const char *host, int port){
 }
 
 /**
+ * @brief Convert a buffer into a colon separated hex string.
+ * The caller has to free the memory.
+ *
+ * @param  what         What should be converted to a hex string.
+ *
+ * @param  len          Length of the buffer to convert.
+ *
+ * @return              The hex string or NULL on error.
+ *
+ * @see ssh_string_free_char()
+ */
+char *ssh_get_hexa(const unsigned char *what, size_t len) {
+    const char h[] = "0123456789abcdef";
+    char *hexa;
+    size_t i;
+    size_t hlen = len * 3;
+
+    if (len > (UINT_MAX - 1) / 3) {
+        return NULL;
+    }
+
+    hexa = malloc(hlen + 1);
+    if (hexa == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < len; i++) {
+        hexa[i * 3] = h[(what[i] >> 4) & 0xF];
+        hexa[i * 3 + 1] = h[what[i] & 0xF];
+        hexa[i * 3 + 2] = ':';
+    }
+    hexa[hlen - 1] = '\0';
+
+    return hexa;
+}
+
+/**
+ * @deprecated          Please use ssh_print_hash() instead
+ */
+void ssh_print_hexa(const char *descr, const unsigned char *what, size_t len) {
+    char *hexa = ssh_get_hexa(what, len);
+
+    if (hexa == NULL) {
+      return;
+    }
+    fprintf(stderr, "%s: %s\n", descr, hexa);
+
+    free(hexa);
+}
+
+/**
  * @brief Check if libssh is the required version or get the version
  * string.
  *
@@ -558,9 +612,17 @@ static struct ssh_iterator *ssh_iterator_new(const void *data){
 }
 
 int ssh_list_append(struct ssh_list *list,const void *data){
-  struct ssh_iterator *iterator=ssh_iterator_new(data);
-  if(!iterator)
-    return SSH_ERROR;
+  struct ssh_iterator *iterator = NULL;
+
+  if (list == NULL) {
+      return SSH_ERROR;
+  }
+
+  iterator = ssh_iterator_new(data);
+  if (iterator == NULL) {
+      return SSH_ERROR;
+  }
+
   if(!list->end){
     /* list is empty */
     list->root=list->end=iterator;
@@ -573,8 +635,13 @@ int ssh_list_append(struct ssh_list *list,const void *data){
 }
 
 int ssh_list_prepend(struct ssh_list *list, const void *data){
-  struct ssh_iterator *it = ssh_iterator_new(data);
+  struct ssh_iterator *it = NULL;
 
+  if (list == NULL) {
+      return SSH_ERROR;
+  }
+
+  it = ssh_iterator_new(data);
   if (it == NULL) {
     return SSH_ERROR;
   }
@@ -593,6 +660,11 @@ int ssh_list_prepend(struct ssh_list *list, const void *data){
 
 void ssh_list_remove(struct ssh_list *list, struct ssh_iterator *iterator){
   struct ssh_iterator *ptr,*prev;
+
+  if (list == NULL) {
+      return;
+  }
+
   prev=NULL;
   ptr=list->root;
   while(ptr && ptr != iterator){
@@ -627,10 +699,17 @@ void ssh_list_remove(struct ssh_list *list, struct ssh_iterator *iterator){
  *                      if the list is empty.
  */
 const void *_ssh_list_pop_head(struct ssh_list *list){
-  struct ssh_iterator *iterator=list->root;
-  const void *data;
-  if(!list->root)
-    return NULL;
+  struct ssh_iterator *iterator = NULL;
+  const void *data = NULL;
+
+  if (list == NULL) {
+      return NULL;
+  }
+
+  iterator = list->root;
+  if (iterator == NULL) {
+      return NULL;
+  }
   data=iterator->data;
   list->root=iterator->next;
   if(list->end==iterator)
@@ -1263,5 +1342,18 @@ char *strndup(const char *s, size_t n)
     return x;
 }
 #endif /* ! HAVE_STRNDUP */
+
+/* Increment 64b integer in network byte order */
+void
+uint64_inc(unsigned char *counter)
+{
+    int i;
+
+    for (i = 7; i >= 0; i--) {
+        counter[i]++;
+        if (counter[i])
+          return;
+    }
+}
 
 /** @} */

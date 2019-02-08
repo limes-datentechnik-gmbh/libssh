@@ -43,6 +43,12 @@ enum ssh_packet_state_e {
   PACKET_STATE_PROCESSING
 };
 
+enum ssh_packet_filter_result_e {
+    SSH_PACKET_UNKNOWN,
+    SSH_PACKET_ALLOWED,
+    SSH_PACKET_DENIED
+};
+
 int ssh_packet_send(ssh_session session);
 
 SSH_PACKET_CALLBACK(ssh_packet_unimplemented);
@@ -64,6 +70,7 @@ int ssh_packet_parse_type(ssh_session session);
 int ssh_packet_socket_callback(const void *data, size_t len, void *user);
 void ssh_packet_register_socket_callback(ssh_session session, struct ssh_socket_struct *s);
 void ssh_packet_set_callbacks(ssh_session session, ssh_packet_callbacks callbacks);
+void ssh_packet_remove_callbacks(ssh_session session, ssh_packet_callbacks callbacks);
 void ssh_packet_set_default_callbacks(ssh_session session);
 void ssh_packet_process(ssh_session session, uint8_t type);
 
@@ -76,5 +83,9 @@ unsigned char *ssh_packet_encrypt(ssh_session session,
                                   unsigned int len);
 int ssh_packet_hmac_verify(ssh_session session,ssh_buffer buffer,
                            unsigned char *mac, enum ssh_hmac_e type);
+int ssh_packet_set_newkeys(ssh_session session,
+                           enum ssh_crypto_direction_e direction);
+struct ssh_crypto_struct *ssh_packet_get_current_crypto(ssh_session session,
+        enum ssh_crypto_direction_e direction);
 
 #endif /* PACKET_H_ */

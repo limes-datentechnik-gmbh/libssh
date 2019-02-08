@@ -12,6 +12,7 @@
 #include <libssh/session.h>
 #include <libssh/misc.h>
 #include <libssh/pki_priv.h>
+#include <libssh/options.h>
 
 static int setup(void **state)
 {
@@ -346,6 +347,86 @@ static void torture_options_get_identity(void **state) {
     free(identity);
 }
 
+static void torture_options_set_global_knownhosts(void **state)
+{
+    ssh_session session = *state;
+    int rc;
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_GLOBAL_KNOWNHOSTS,
+                         "/etc/libssh/known_hosts");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.global_knownhosts,
+                        "/etc/libssh/known_hosts");
+}
+
+static void torture_options_get_global_knownhosts(void **state)
+{
+    ssh_session session = *state;
+    char *str = NULL;
+    int rc;
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_GLOBAL_KNOWNHOSTS,
+                         "/etc/libssh/known_hosts");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.global_knownhosts,
+                        "/etc/libssh/known_hosts");
+
+
+    rc = ssh_options_get(session, SSH_OPTIONS_GLOBAL_KNOWNHOSTS, &str);
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.global_knownhosts,
+                        "/etc/libssh/known_hosts");
+
+    SSH_STRING_FREE_CHAR(str);
+}
+
+static void torture_options_set_knownhosts(void **state)
+{
+    ssh_session session = *state;
+    int rc;
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_KNOWNHOSTS,
+                         "/home/libssh/.ssh/known_hosts");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.knownhosts,
+                        "/home/libssh/.ssh/known_hosts");
+
+    /* The NULL value should not crash the libssh */
+    rc = ssh_options_set(session, SSH_OPTIONS_KNOWNHOSTS, NULL);
+    assert_ssh_return_code(session, rc);
+    assert_null(session->opts.knownhosts);
+
+    /* ssh_options_apply() should set the path to correct value */
+    rc = ssh_options_apply(session);
+    assert_ssh_return_code(session, rc);
+    assert_non_null(session->opts.knownhosts);
+}
+
+static void torture_options_get_knownhosts(void **state)
+{
+    ssh_session session = *state;
+    char *str = NULL;
+    int rc;
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_KNOWNHOSTS,
+                         "/home/libssh/.ssh/known_hosts");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.knownhosts,
+                        "/home/libssh/.ssh/known_hosts");
+
+
+    rc = ssh_options_get(session, SSH_OPTIONS_KNOWNHOSTS, &str);
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.knownhosts,
+                        "/home/libssh/.ssh/known_hosts");
+
+    SSH_STRING_FREE_CHAR(str);
+}
+
 static void torture_options_proxycommand(void **state) {
     ssh_session session = *state;
     int rc;
@@ -381,22 +462,26 @@ static void torture_options_config_host(void **state) {
 
     assert_int_equal(session->opts.port, 42);
 
+    torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "testhost2");
     ssh_options_parse_config(session, "test_config");
     assert_int_equal(session->opts.port, 43);
 
     session->opts.port = 0;
 
+    torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "testhost3");
     ssh_options_parse_config(session, "test_config");
     assert_int_equal(session->opts.port, 43);
 
+    torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "testhost4");
     ssh_options_parse_config(session, "test_config");
     assert_int_equal(session->opts.port, 44);
 
     session->opts.port = 0;
 
+    torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "testhost5");
     ssh_options_parse_config(session, "test_config");
     assert_int_equal(session->opts.port, 44);
@@ -424,6 +509,7 @@ static void torture_options_config_match(void **state)
     assert_ssh_return_code_equal(session, rv, SSH_ERROR);
 
     /* The Match all keyword needs to be the only one (start) */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match all host local\n",
@@ -434,6 +520,7 @@ static void torture_options_config_match(void **state)
     assert_ssh_return_code_equal(session, rv, SSH_ERROR);
 
     /* The Match all keyword needs to be the only one (end) */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match host local all\n",
@@ -444,6 +531,7 @@ static void torture_options_config_match(void **state)
     assert_ssh_return_code_equal(session, rv, SSH_ERROR);
 
     /* The Match host keyword requires an argument */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match host\n",
@@ -454,6 +542,7 @@ static void torture_options_config_match(void **state)
     assert_ssh_return_code_equal(session, rv, SSH_ERROR);
 
     /* The Match user keyword requires an argument */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match user\n",
@@ -463,7 +552,8 @@ static void torture_options_config_match(void **state)
     rv = ssh_options_parse_config(session, "test_config");
     assert_ssh_return_code_equal(session, rv, SSH_ERROR);
 
-    /* The Match canonical keyword is ignored */
+    /* The Match canonical keyword is the same as match all */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match canonical\n"
@@ -475,11 +565,12 @@ static void torture_options_config_match(void **state)
 
     rv = ssh_options_parse_config(session, "test_config");
     assert_ssh_return_code_equal(session, rv, SSH_OK);
-    assert_int_equal(session->opts.port, 34);
+    assert_int_equal(session->opts.port, 33);
 
     session->opts.port = 0;
 
     /* The Match originalhost keyword is ignored */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match originalhost origin\n"
@@ -496,6 +587,7 @@ static void torture_options_config_match(void **state)
     session->opts.port = 0;
 
     /* The Match localuser keyword is ignored */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match originalhost origin\n"
@@ -512,6 +604,7 @@ static void torture_options_config_match(void **state)
     session->opts.port = 0;
 
     /* The Match exec keyword is ignored */
+    torture_reset_config(session);
     config = fopen("test_config", "w");
     assert_non_null(config);
     fputs("Match exec /bin/true\n"
@@ -528,6 +621,114 @@ static void torture_options_config_match(void **state)
     session->opts.port = 0;
 
     unlink("test_config");
+}
+
+static void torture_options_copy(void **state)
+{
+    ssh_session session = *state, new = NULL;
+    struct ssh_iterator *it = NULL, *it2 = NULL;
+    FILE *config = NULL;
+    int i, level = 9;
+    int rv;
+
+    /* Required for options_parse_config() */
+    ssh_options_set(session, SSH_OPTIONS_HOST, "example");
+
+    /* Impossible to set through the configuration */
+    rv = ssh_options_set(session, SSH_OPTIONS_COMPRESSION_LEVEL, &level);
+    assert_ssh_return_code(session, rv);
+    level = 1;
+    rv = ssh_options_set(session, SSH_OPTIONS_NODELAY, &level);
+    assert_ssh_return_code(session, rv);
+
+    /* The Match keyword requires argument */
+    config = fopen("test_config", "w");
+    assert_non_null(config);
+    fputs("IdentityFile ~/.ssh/id_ecdsa\n"
+          "User tester\n"
+          "Hostname example.com\n"
+          "BindAddress 127.0.0.2\n"
+          "GlobalKnownHostsFile /etc/ssh/known_hosts2\n"
+          "UserKnownHostsFile ~/.ssh/known_hosts2\n"
+          "KexAlgorithms curve25519-sha256\n"
+          "Ciphers aes256-ctr\n"
+          "MACs hmac-sha2-256\n"
+          "HostKeyAlgorithms ssh-ed25519\n"
+          "Compression yes\n"
+          "PubkeyAcceptedTypes ssh-ed25519\n"
+          "ProxyCommand nc 127.0.0.10 22\n"
+          /* ops.custombanner */
+          "ConnectTimeout 42\n"
+          "Port 222\n"
+          "StrictHostKeyChecking no\n"
+          "GSSAPIServerIdentity my.example.com\n"
+          "GSSAPIClientIdentity home.sweet\n"
+          "GSSAPIDelegateCredentials yes\n"
+          "PubkeyAuthentication yes\n" /* sets flags */
+          "GSSAPIAuthentication no\n" /* sets flags */
+          "",
+          config);
+    fclose(config);
+
+    rv = ssh_options_parse_config(session, "test_config");
+    assert_ssh_return_code(session, rv);
+
+    rv = ssh_options_copy(session, &new);
+    assert_ssh_return_code(session, rv);
+    assert_non_null(new);
+
+    /* Check the identities match */
+    it = ssh_list_get_iterator(session->opts.identity);
+    assert_non_null(it);
+    it2 = ssh_list_get_iterator(new->opts.identity);
+    assert_non_null(it2);
+    while (it != NULL && it2 != NULL) {
+        assert_string_equal(it->data, it2->data);
+        it = it->next;
+        it2 = it2->next;
+    }
+    assert_null(it);
+    assert_null(it2);
+
+    assert_string_equal(session->opts.username, new->opts.username);
+    assert_string_equal(session->opts.host, new->opts.host);
+    assert_string_equal(session->opts.bindaddr, new->opts.bindaddr);
+    assert_string_equal(session->opts.sshdir, new->opts.sshdir);
+    assert_string_equal(session->opts.knownhosts, new->opts.knownhosts);
+    assert_string_equal(session->opts.global_knownhosts,
+                        new->opts.global_knownhosts);
+    for (i = 0; i < 10; i++) {
+        if (session->opts.wanted_methods[i] == NULL) {
+            assert_null(new->opts.wanted_methods[i]);
+        } else {
+            assert_string_equal(session->opts.wanted_methods[i],
+                                new->opts.wanted_methods[i]);
+        }
+    }
+    assert_string_equal(session->opts.pubkey_accepted_types,
+                        new->opts.pubkey_accepted_types);
+    assert_string_equal(session->opts.ProxyCommand, new->opts.ProxyCommand);
+    /* TODO custombanner */
+    assert_int_equal(session->opts.timeout, new->opts.timeout);
+    assert_int_equal(session->opts.timeout_usec, new->opts.timeout_usec);
+    assert_int_equal(session->opts.port, new->opts.port);
+    assert_int_equal(session->opts.StrictHostKeyChecking,
+                     new->opts.StrictHostKeyChecking);
+    assert_int_equal(session->opts.compressionlevel,
+                     new->opts.compressionlevel);
+    assert_string_equal(session->opts.gss_server_identity,
+                        new->opts.gss_server_identity);
+    assert_string_equal(session->opts.gss_client_identity,
+                        new->opts.gss_client_identity);
+    assert_int_equal(session->opts.gss_delegate_creds,
+                     new->opts.gss_delegate_creds);
+    assert_int_equal(session->opts.flags, new->opts.flags);
+    assert_int_equal(session->opts.nodelay, new->opts.nodelay);
+    assert_true(session->opts.config_processed == new->opts.config_processed);
+    assert_memory_equal(session->opts.options_seen, new->opts.options_seen,
+                        sizeof(session->opts.options_seen));
+
+    ssh_free(new);
 }
 
 
@@ -581,7 +782,7 @@ static void torture_bind_options_import_key(void **state)
     assert_int_equal(rc, 0);
 #endif
     /* set ecdsa key */
-    base64_key = torture_get_testkey(SSH_KEYTYPE_ECDSA, 512, 0);
+    base64_key = torture_get_testkey(SSH_KEYTYPE_ECDSA, 521, 0);
     rc = ssh_pki_import_privkey_base64(base64_key, NULL, NULL, NULL, &key);
     assert_int_equal(rc, SSH_OK);
     assert_non_null(key);
@@ -604,12 +805,17 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_options_get_user, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_identity, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_get_identity, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_global_knownhosts, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_global_knownhosts, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_knownhosts, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_knownhosts, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_proxycommand, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_ciphers, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_key_exchange, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_hostkey, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_pubkey_accepted_types, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_macs, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_copy, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_config_host, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_options_config_match,
                                         setup, teardown)

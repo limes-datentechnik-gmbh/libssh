@@ -343,12 +343,24 @@ static int ssh_bind_poll_callback(ssh_poll_handle sshpoll,
  * @param sshbind the ssh_bind object
  * @returns a ssh_poll handle suitable for operation
  */
-ssh_poll_handle ssh_bind_get_poll(ssh_bind sshbind){
-  if(sshbind->poll)
+ssh_poll_handle ssh_bind_get_poll(ssh_bind sshbind)
+{
+    short events = POLLIN;
+
+    if (sshbind->poll) {
+        return sshbind->poll;
+    }
+
+#ifdef POLLRDHUP
+    events |= POLLRDHUP;
+#endif /* POLLRDHUP */
+
+    sshbind->poll = ssh_poll_new(sshbind->bindfd,
+                                 events,
+                                 ssh_bind_poll_callback,
+                                 sshbind);
+
     return sshbind->poll;
-  sshbind->poll=ssh_poll_new(sshbind->bindfd,POLLIN,
-      ssh_bind_poll_callback,sshbind);
-  return sshbind->poll;
 }
 
 void ssh_bind_set_blocking(ssh_bind sshbind, int blocking) {
@@ -447,7 +459,7 @@ int ssh_bind_accept_fd(ssh_bind sshbind, ssh_session session, socket_t fd){
       return SSH_ERROR;
     }
     ssh_socket_set_fd(session->socket, fd);
-    ssh_socket_get_poll_handle_out(session->socket);
+    ssh_socket_get_poll_handle(session->socket);
 
     /* We must try to import any keys that could be imported in case
      * we are not using ssh_bind_listen (which is the other place

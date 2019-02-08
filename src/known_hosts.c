@@ -39,15 +39,6 @@
 /*todo: remove this include */
 #include "libssh/string.h"
 
-#ifdef HAVE_LIBGCRYPT
-#include <gcrypt.h>
-#elif defined HAVE_LIBCRYPTO
-#include <openssl/pem.h>
-#include <openssl/dsa.h>
-#include <openssl/err.h>
-#include <openssl/rsa.h>
-#endif /* HAVE_LIBCRYPTO */
-
 #ifndef _WIN32
 # include <netinet/in.h>
 # include <arpa/inet.h>
@@ -131,7 +122,7 @@ static char **ssh_get_knownhost_line(FILE **file, const char *filename,
       return NULL;
     }
 
-    if(tokens[0]==NULL || tokens[1]==NULL || tokens[2]==NULL) {
+    if(tokens[0] == NULL || tokens[1] == NULL || tokens[2] == NULL) {
       /* it should have at least 3 tokens */
       tokens_free(tokens);
       continue;

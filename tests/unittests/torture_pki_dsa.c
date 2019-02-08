@@ -14,16 +14,39 @@
 #define LIBSSH_DSA_TESTKEY "libssh_testkey.id_dsa"
 #define LIBSSH_DSA_TESTKEY_PASSPHRASE "libssh_testkey_passphrase.id_dsa"
 
+const char template[] = "temp_dir_XXXXXX";
 const unsigned char DSA_HASH[] = "12345678901234567890";
+
+struct pki_st {
+    char *cwd;
+    char *temp_dir;
+};
 
 static int setup_dsa_key(void **state)
 {
-    (void) state; /* unused */
+    struct pki_st *test_state = NULL;
+    char *cwd = NULL;
+    char *tmp_dir = NULL;
+    int rc = 0;
 
-    unlink(LIBSSH_DSA_TESTKEY);
-    unlink(LIBSSH_DSA_TESTKEY_PASSPHRASE);
-    unlink(LIBSSH_DSA_TESTKEY ".pub");
-    unlink(LIBSSH_DSA_TESTKEY "-cert.pub");
+    test_state = (struct pki_st *)malloc(sizeof(struct pki_st));
+    assert_non_null(test_state);
+
+    cwd = torture_get_current_working_dir();
+    assert_non_null(cwd);
+
+    tmp_dir = torture_make_temp_dir(template);
+    assert_non_null(tmp_dir);
+
+    test_state->cwd = cwd;
+    test_state->temp_dir = tmp_dir;
+
+    *state = test_state;
+
+    rc = torture_change_dir(tmp_dir);
+    assert_int_equal(rc, 0);
+
+    printf("Changed directory to: %s\n", tmp_dir);
 
     torture_write_file(LIBSSH_DSA_TESTKEY,
                        torture_get_testkey(SSH_KEYTYPE_DSS, 0, 0));
@@ -39,12 +62,27 @@ static int setup_dsa_key(void **state)
 
 static int setup_openssh_dsa_key(void **state)
 {
-    (void) state; /* unused */
+    struct pki_st *test_state = NULL;
+    char *cwd = NULL;
+    char *tmp_dir = NULL;
+    int rc = 0;
 
-    unlink(LIBSSH_DSA_TESTKEY);
-    unlink(LIBSSH_DSA_TESTKEY_PASSPHRASE);
-    unlink(LIBSSH_DSA_TESTKEY ".pub");
-    unlink(LIBSSH_DSA_TESTKEY "-cert.pub");
+    test_state = (struct pki_st *)malloc(sizeof(struct pki_st));
+    assert_non_null(test_state);
+
+    cwd = torture_get_current_working_dir();
+    assert_non_null(cwd);
+
+    tmp_dir = torture_make_temp_dir(template);
+    assert_non_null(tmp_dir);
+
+    test_state->cwd = cwd;
+    test_state->temp_dir = tmp_dir;
+
+    *state = test_state;
+
+    rc = torture_change_dir(tmp_dir);
+    assert_int_equal(rc, 0);
 
     torture_write_file(LIBSSH_DSA_TESTKEY,
                        torture_get_openssh_testkey(SSH_KEYTYPE_DSS, 0, 0));
@@ -58,14 +96,26 @@ static int setup_openssh_dsa_key(void **state)
     return 0;
 }
 
-static int teardown_dsa_key(void **state)
-{
-    (void)state;
+static int teardown(void **state) {
 
-    unlink(LIBSSH_DSA_TESTKEY);
-    unlink(LIBSSH_DSA_TESTKEY_PASSPHRASE);
-    unlink(LIBSSH_DSA_TESTKEY ".pub");
-    unlink(LIBSSH_DSA_TESTKEY "-cert.pub");
+    struct pki_st *test_state = NULL;
+    int rc = 0;
+
+    test_state = *((struct pki_st **)state);
+
+    assert_non_null(test_state);
+    assert_non_null(test_state->cwd);
+    assert_non_null(test_state->temp_dir);
+
+    rc = torture_change_dir(test_state->cwd);
+    assert_int_equal(rc, 0);
+
+    rc = torture_rmdirs(test_state->temp_dir);
+    assert_int_equal(rc, 0);
+
+    SAFE_FREE(test_state->temp_dir);
+    SAFE_FREE(test_state->cwd);
+    SAFE_FREE(test_state);
 
     return 0;
 }
@@ -133,6 +183,7 @@ static void torture_pki_dsa_write_privkey(void **state)
                                      NULL,
                                      &origkey);
     assert_true(rc == 0);
+    assert_non_null(origkey);
 
     unlink(LIBSSH_DSA_TESTKEY);
 
@@ -181,6 +232,7 @@ static void torture_pki_dsa_write_privkey(void **state)
                                      NULL,
                                      &privkey);
     assert_true(rc == SSH_ERROR);
+    assert_null(privkey);
 
     rc = ssh_pki_import_privkey_file(LIBSSH_DSA_TESTKEY_PASSPHRASE,
                                      torture_get_testkey_passphrase(),
@@ -188,6 +240,7 @@ static void torture_pki_dsa_write_privkey(void **state)
                                      NULL,
                                      &privkey);
     assert_true(rc == 0);
+    assert_non_null(privkey);
 
     rc = ssh_key_cmp(origkey, privkey, SSH_KEY_CMP_PRIVATE);
     assert_true(rc == 0);
@@ -211,6 +264,7 @@ static void torture_pki_dsa_import_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_return_code(rc, errno);
+    assert_non_null(key);
 
     rc = ssh_key_is_private(key);
     assert_true(rc == 1);
@@ -224,6 +278,7 @@ static void torture_pki_dsa_import_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == -1);
+    assert_null(key);
 
     /* test if it returns -1 if passphrase is NULL */
     /* libcrypto asks for a passphrase, so skip this test */
@@ -234,6 +289,7 @@ static void torture_pki_dsa_import_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == -1);
+    assert_null(key);
 #endif
 
     rc = ssh_pki_import_privkey_base64(torture_get_testkey(SSH_KEYTYPE_DSS, 0, 1),
@@ -242,6 +298,7 @@ static void torture_pki_dsa_import_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_return_code(rc, errno);
+    assert_non_null(key);
 
     rc = ssh_key_is_private(key);
     assert_true(rc == 1);
@@ -255,6 +312,7 @@ static void torture_pki_dsa_import_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == -1);
+    assert_null(key);
 
     /* This free in unnecessary, but the static analyser does not know */
     SSH_KEY_FREE(key);
@@ -268,6 +326,7 @@ static void torture_pki_dsa_import_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == -1);
+    assert_null(key);
 
     /* This free in unnecessary, but the static analyser does not know */
     SSH_KEY_FREE(key);
@@ -285,7 +344,7 @@ torture_pki_dsa_import_openssh_privkey_base64_passphrase(void **state)
     (void) state; /* unused */
 
     keystring = torture_get_openssh_testkey(SSH_KEYTYPE_DSS, 0, 1);
-    assert_true(keystring != NULL);
+    assert_non_null(keystring);
 
     rc = ssh_pki_import_privkey_base64(keystring,
                                        passphrase,
@@ -293,6 +352,7 @@ torture_pki_dsa_import_openssh_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_return_code(rc, errno);
+    assert_non_null(key);
 
     rc = ssh_key_is_private(key);
     assert_true(rc == 1);
@@ -306,6 +366,7 @@ torture_pki_dsa_import_openssh_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == -1);
+    assert_null(key);
 
     /* test if it returns -1 if passphrase is NULL */
     rc = ssh_pki_import_privkey_base64(keystring,
@@ -321,6 +382,7 @@ torture_pki_dsa_import_openssh_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_return_code(rc, errno);
+    assert_non_null(key);
 
     rc = ssh_key_is_private(key);
     assert_true(rc == 1);
@@ -334,6 +396,7 @@ torture_pki_dsa_import_openssh_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == -1);
+    assert_null(key);
 
     /* This free is unnecessary, but the static analyser does not know */
     SSH_KEY_FREE(key);
@@ -345,6 +408,7 @@ torture_pki_dsa_import_openssh_privkey_base64_passphrase(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == -1);
+    assert_null(key);
 
     /* This free is unnecessary, but the static analyser does not know */
     SSH_KEY_FREE(key);
@@ -366,12 +430,14 @@ static void torture_pki_dsa_publickey_from_privatekey(void **state)
                                        NULL,
                                        &key);
     assert_true(rc == 0);
+    assert_non_null(key);
 
     rc = ssh_key_is_private(key);
     assert_true(rc == 1);
 
     rc = ssh_pki_export_privkey_to_pubkey(key, &pubkey);
     assert_true(rc == SSH_OK);
+    assert_non_null(pubkey);
 
     SSH_KEY_FREE(key);
     SSH_KEY_FREE(pubkey);
@@ -387,6 +453,7 @@ static void torture_pki_dsa_import_cert_file(void **state)
 
     rc = ssh_pki_import_cert_file(LIBSSH_DSA_TESTKEY "-cert.pub", &cert);
     assert_true(rc == 0);
+    assert_non_null(cert);
 
     type = ssh_key_type(cert);
     assert_true(type == SSH_KEYTYPE_DSS_CERT01);
@@ -410,7 +477,7 @@ static void torture_pki_dsa_publickey_base64(void **state)
     (void) state; /* unused */
 
     key_buf = strdup(torture_get_testkey_pub(SSH_KEYTYPE_DSS, 0));
-    assert_true(key_buf != NULL);
+    assert_non_null(key_buf);
 
     keylen = strlen(key_buf);
 
@@ -437,9 +504,11 @@ static void torture_pki_dsa_publickey_base64(void **state)
 
     rc = ssh_pki_import_pubkey_base64(str, type, &key);
     assert_true(rc == 0);
+    assert_non_null(key);
 
     rc = ssh_pki_export_pubkey_base64(key, &b64_key);
     assert_true(rc == 0);
+    assert_non_null(b64_key);
 
     assert_string_equal(str, b64_key);
 
@@ -467,9 +536,11 @@ static void torture_pki_dsa_generate_pubkey_from_privkey(void **state)
                                      NULL,
                                      &privkey);
     assert_true(rc == 0);
+    assert_non_null(privkey);
 
     rc = ssh_pki_export_privkey_to_pubkey(privkey, &pubkey);
     assert_true(rc == SSH_OK);
+    assert_non_null(pubkey);
 
     rc = ssh_pki_export_pubkey_file(pubkey, LIBSSH_DSA_TESTKEY ".pub");
     assert_true(rc == 0);
@@ -505,6 +576,7 @@ static void torture_pki_dsa_duplicate_key(void **state)
 
     rc = ssh_pki_export_pubkey_base64(pubkey, &b64_key);
     assert_true(rc == 0);
+    assert_non_null(b64_key);
     SSH_KEY_FREE(pubkey);
 
     rc = ssh_pki_import_privkey_file(LIBSSH_DSA_TESTKEY,
@@ -516,7 +588,6 @@ static void torture_pki_dsa_duplicate_key(void **state)
     assert_non_null(privkey);
 
     privkey_dup = ssh_key_dup(privkey);
-    assert_true(privkey_dup != NULL);
     assert_non_null(privkey_dup);
 
     rc = ssh_pki_export_privkey_to_pubkey(privkey, &pubkey);
@@ -549,9 +620,9 @@ static void torture_pki_dsa_generate_key(void **state)
 
     rc = ssh_pki_generate(SSH_KEYTYPE_DSS, 1024, &key);
     assert_true(rc == SSH_OK);
-    assert_true(key != NULL);
+    assert_non_null(key);
     sign = pki_do_sign(key, DSA_HASH, 20);
-    assert_true(sign != NULL);
+    assert_non_null(sign);
     rc = pki_signature_verify(session,sign,key,DSA_HASH,20);
     assert_true(rc == SSH_OK);
     ssh_signature_free(sign);
@@ -559,9 +630,9 @@ static void torture_pki_dsa_generate_key(void **state)
 
     rc = ssh_pki_generate(SSH_KEYTYPE_DSS, 2048, &key);
     assert_true(rc == SSH_OK);
-    assert_true(key != NULL);
+    assert_non_null(key);
     sign = pki_do_sign(key, DSA_HASH, 20);
-    assert_true(sign != NULL);
+    assert_non_null(sign);
     rc = pki_signature_verify(session,sign,key,DSA_HASH,20);
     assert_true(rc == SSH_OK);
     ssh_signature_free(sign);
@@ -569,9 +640,9 @@ static void torture_pki_dsa_generate_key(void **state)
 
     rc = ssh_pki_generate(SSH_KEYTYPE_DSS, 3072, &key);
     assert_true(rc == SSH_OK);
-    assert_true(key != NULL);
+    assert_non_null(key);
     sign = pki_do_sign(key, DSA_HASH, 20);
-    assert_true(sign != NULL);
+    assert_non_null(sign);
     rc = pki_signature_verify(session,sign,key,DSA_HASH,20);
     assert_true(rc == SSH_OK);
     ssh_signature_free(sign);
@@ -586,26 +657,26 @@ int torture_run_tests(void)
     struct CMUnitTest tests[] = {
         cmocka_unit_test_setup_teardown(torture_pki_dsa_import_pubkey_file,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_import_pubkey_from_openssh_privkey,
                                  setup_openssh_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_import_privkey_base64,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_import_privkey_base64,
                                  setup_openssh_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_publickey_from_privatekey,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_import_cert_file,
                                         setup_dsa_key,
-                                        teardown_dsa_key),
+                                        teardown),
 #ifdef HAVE_LIBCRYPTO
         cmocka_unit_test_setup_teardown(torture_pki_dsa_write_privkey,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
 #endif
         cmocka_unit_test(torture_pki_dsa_import_privkey_base64_passphrase),
         cmocka_unit_test(torture_pki_dsa_import_openssh_privkey_base64_passphrase),
@@ -613,16 +684,16 @@ int torture_run_tests(void)
         /* public key */
         cmocka_unit_test_setup_teardown(torture_pki_dsa_publickey_base64,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_generate_pubkey_from_privkey,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_duplicate_key,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test_setup_teardown(torture_pki_dsa_duplicate_key,
                                  setup_dsa_key,
-                                 teardown_dsa_key),
+                                 teardown),
         cmocka_unit_test(torture_pki_dsa_generate_key),
     };
 

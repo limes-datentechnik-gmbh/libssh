@@ -32,8 +32,29 @@ fedora/openssl_1.1.x/x86_64:
   - mkdir -p obj && cd obj && cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_BLOWFISH_CIPHER=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
+    -DWITH_DEBUG_CRYPTO=ON -DWITH_DEBUG_PACKET=ON -DWITH_DEBUG_CALLTRACE=ON
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
+    make -j$(nproc) && ctest --output-on-failure
+  tags:
+  - shared
+  except:
+  - tags
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj/
+
+fedora/openssl_1.1.x/x86_64/minimal:
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+  script:
+  - mkdir -p obj && cd obj && cmake
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    -DPICKY_DEVELOPER=ON
+    -DWITH_SFTP=OFF -DWITH_SERVER=OFF -DWITH_ZLIB=OFF -DWITH_PCAP=OFF
+    -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DWITH_GEX=OFF .. &&
     make -j$(nproc) && ctest --output-on-failure
   tags:
   - shared
@@ -54,9 +75,31 @@ fedora/address-sanitizer:
   - mkdir -p obj && cd obj && cmake
     -DCMAKE_BUILD_TYPE=AddressSanitizer
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
+  tags:
+  - shared
+  except:
+  - tags
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj/
+
+# This is disabled as it report OpenSSL issues
+# It also has ethe same issues with cwrap as AddressSanitizer
+.fedora/memory-sanitizer:
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+  script:
+  - mkdir -p obj && cd obj && cmake
+    -DCMAKE_BUILD_TYPE=MemorySanitizer
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+    -DPICKY_DEVELOPER=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
+    -DUNIT_TESTING=ON ..
+    && make -j$(nproc) && ctest --output-on-failure
   tags:
   - shared
   except:
@@ -71,8 +114,9 @@ fedora/undefined-sanitizer:
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
   script:
   - mkdir -p obj && cd obj && cmake
-    -DCMAKE_C_FLAGS="-fsanitize=undefined -fsanitize=null -fsanitize=alignment -fno-sanitize-recover"
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DCMAKE_BUILD_TYPE=UndefinedSanitizer
+    -DPICKY_DEVELOPER=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON ..
     && make -j$(nproc) && ctest --output-on-failure
   tags:
@@ -85,6 +129,37 @@ fedora/undefined-sanitizer:
     paths:
       - obj/
 
+fedora/csbuild:
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+  script:
+  - |
+    if [[ -z "$CI_COMMIT_BEFORE_SHA" ]]; then
+        export CI_COMMIT_BEFORE_SHA=$(git rev-parse "${CI_COMMIT_SHA}~20")
+    fi
+
+    # Check if the commit exists in this branch
+    # This is not the case for a force push
+    git branch --contains $CI_COMMIT_BEFORE_SHA 2>/dev/null || export CI_COMMIT_BEFORE_SHA=$(git rev-parse "${CI_COMMIT_SHA}~20")
+
+    export CI_COMMIT_RANGE="$CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA"
+
+  - csbuild
+    --build-dir=obj-csbuild
+    --prep-cmd="cmake -DCMAKE_BUILD_TYPE=Debug -DPICKY_DEVELOPER=ON -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON -DFUZZ_TESTING=ON @SRCDIR@"
+    --build-cmd "make clean && make -j$(nproc)"
+    --git-commit-range $CI_COMMIT_RANGE
+    --color
+    --print-current --print-fixed
+  tags:
+  - shared
+  except:
+  - tags
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj-csbuild/
+
 # That is a specific runner that we cannot enable universally.
 # We restrict it to builds under the $BUILD_IMAGES_PROJECT project.
 freebsd/x86_64:
@@ -93,7 +168,7 @@ freebsd/x86_64:
   - mkdir -p obj && cd obj && cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON .. &&
     make && ctest --output-on-failure
   tags:
@@ -115,7 +190,7 @@ fedora/libgcrypt/x86_64:
   - mkdir -p obj && cd obj && cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON
     -DWITH_GCRYPT=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
@@ -135,7 +210,7 @@ fedora/mbedtls/x86_64:
   - mkdir -p obj && cd obj && cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON
     -DWITH_MBEDTLS=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
@@ -159,7 +234,7 @@ fedora/mingw64:
   - mkdir -p obj && cd obj && mingw64-cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON .. &&
     make -j$(nproc) &&
     ctest --output-on-failure
@@ -183,7 +258,7 @@ fedora/mingw32:
   - mkdir -p obj && cd obj && mingw32-cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON .. &&
     make -j$(nproc) &&
     ctest --output-on-failure
@@ -221,7 +296,7 @@ fedora/mingw32:
     paths:
       - obj/
 
-Debian.cross.mips-linux-gnu:
+.Debian.cross.mips-linux-gnu:
   <<: *Debian_cross_template
 
 tumbleweed/openssl_1.1.x/x86_64/gcc:
@@ -230,7 +305,7 @@ tumbleweed/openssl_1.1.x/x86_64/gcc:
   - mkdir -p obj && cd obj && cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DKRB5_CONFIG=/usr/lib/mit/bin/krb5-config
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
@@ -251,7 +326,7 @@ tumbleweed/openssl_1.1.x/x86/gcc:
     -DCMAKE_TOOLCHAIN_FILE=../cmake/Toolchain-cross-m32.cmake
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
   tags:
@@ -271,7 +346,7 @@ tumbleweed/openssl_1.1.x/x86_64/gcc7:
     -DCMAKE_C_COMPILER=gcc-7 -DCMAKE_CXX_COMPILER=g++-7
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DKRB5_CONFIG=/usr/lib/mit/bin/krb5-config
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
@@ -293,7 +368,7 @@ tumbleweed/openssl_1.1.x/x86/gcc7:
     -DCMAKE_C_COMPILER=gcc-7 -DCMAKE_CXX_COMPILER=g++-7
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
   tags:
@@ -313,7 +388,7 @@ tumbleweed/openssl_1.1.x/x86_64/clang:
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DKRB5_CONFIG=/usr/lib/mit/bin/krb5-config
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
@@ -347,7 +422,7 @@ tumbleweed/undefined-sanitizer:
   - mkdir -p obj && cd obj && cmake
     -DCMAKE_BUILD_TYPE=UndefinedSanitizer
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
     make -j$(nproc) && ctest --output-on-failure
   tags:
@@ -369,7 +444,7 @@ tumbleweed/static-analysis:
     -DCMAKE_BUILD_TYPE=Debug
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
     -DPICKY_DEVELOPER=ON
-    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON --DWITH_PCAP=ON
+    -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
     -DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON .. &&
     scan-build --status-bugs -o scan make -j$(nproc)
   tags:
@@ -381,3 +456,58 @@ tumbleweed/static-analysis:
     when: on_failure
     paths:
       - obj/scan
+
+visualstudio/x86_64:
+  script:
+  - $env:VCPKG_DEFAULT_TRIPLET="x64-windows"
+  - cd obj
+  - cmake
+      -A x64
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_TOOLCHAIN_FILE"
+      -DPICKY_DEVELOPER=ON
+      -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
+      -DUNIT_TESTING=ON ..
+  - cmake --build .
+  - ctest --output-on-failure
+  tags:
+  - vs2017
+  - windows
+  except:
+  - tags
+  only:
+  - branches@libssh/libssh-mirror
+  - branches@ansasaki/libssh-mirror
+  - branches@cryptomilk/libssh-mirror
+  - branches@jjelen/libssh-mirror
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj/
+
+visualstudio/x86:
+  script:
+  - $env:VCPKG_DEFAULT_TRIPLET="x86-windows"
+  - cd obj
+  - cmake
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_TOOLCHAIN_FILE"
+      -DPICKY_DEVELOPER=ON
+      -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON
+      -DUNIT_TESTING=ON ..
+  - cmake --build .
+  - ctest --output-on-failure
+  tags:
+  - vs2017
+  - windows
+  except:
+  - tags
+  only:
+  - branches@libssh/libssh-mirror
+  - branches@ansasaki/libssh-mirror
+  - branches@cryptomilk/libssh-mirror
+  - branches@jjelen/libssh-mirror
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj/

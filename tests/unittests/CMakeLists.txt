@@ -4,6 +4,7 @@ include_directories(${OPENSSL_INCLUDE_DIR})
 
 set(LIBSSH_UNIT_TESTS
     torture_buffer
+    torture_bytearray
     torture_callbacks
     torture_crypto
     torture_init
@@ -14,6 +15,10 @@ set(LIBSSH_UNIT_TESTS
     torture_isipaddr
     torture_knownhosts_parsing
     torture_hashes
+    torture_packet_filter
+    torture_temp_dir
+    torture_temp_file
+    torture_push_pop_dir
 )
 
 set(LIBSSH_THREAD_UNIT_TESTS
@@ -36,6 +41,13 @@ if (UNIX AND NOT WIN32)
         # requires /dev/null
         torture_channel
     )
+
+    if (WITH_SERVER AND WITH_GEX)
+        set(LIBSSH_UNIT_TESTS
+            ${LIBSSH_UNIT_TESTS}
+            torture_moduli)
+    endif()
+
 
     if (HAVE_DSA)
         set(LIBSSH_UNIT_TESTS
