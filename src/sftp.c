@@ -266,6 +266,9 @@ int sftp_server_init(sftp_session sftp){
   sftp_packet packet = NULL;
   ssh_buffer reply = NULL;
   uint32_t version;
+  #ifdef __EBCDIC__
+  const char* packformat = NULL;
+  #endif
   int rc;
 
   packet = sftp_packet_read(sftp);
@@ -294,18 +297,24 @@ int sftp_server_init(sftp_session sftp){
     return -1;
   }
 
-  rc = ssh_buffer_pack(reply, "dssss",
+  #ifdef __EBCDIC__
+  packformat = "dssss";
+  #pragma convert("ISO8859-1")
+  rc = ssh_buffer_pack(reply, packformat,
                       LIBSFTP_VERSION,
-                      #ifdef __EBCDIC__
-                      #pragma convert("ISO8859-1")
-                      #endif
                       "posix-rename@openssh.com",
                       "1",
                       "hardlink@openssh.com",
                       "1");
-                      #ifdef __EBCDIC__
-                      #pragma convert(pop)
-                      #endif
+  #pragma convert(pop)
+  #else
+  rc = ssh_buffer_pack(reply, "dssss",
+                      LIBSFTP_VERSION,
+                      "posix-rename@openssh.com",
+                      "1",
+                      "hardlink@openssh.com",
+                      "1");
+  #endif
   if (rc != SSH_OK) {
     ssh_set_error_oom(session);
     ssh_buffer_free(reply);
