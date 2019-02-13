@@ -1266,9 +1266,6 @@ int ssh_packet_socket_callback(const void *data, size_t receivedlen, void *user)
                     "packet: read type %hhd [len=%d,padding=%hhd,comp=%d,payload=%d]",
                     session->in_packet.type, packet_len, padding, compsize, payloadsize);
 
-
-            /* Execute callbacks */
-            ssh_packet_process(session, session->in_packet.type);
             /* Check if the packet is expected */
             filter_result = ssh_packet_incoming_filter(session);
 
