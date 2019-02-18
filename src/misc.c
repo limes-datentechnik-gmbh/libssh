@@ -1285,16 +1285,57 @@ int ssh_match_group(const char *group, const char *object)
     const char *a;
     const char *z;
 
+#ifdef __EBCDIC__
+    char* g = NULL;
+    char* o = NULL;
+    if (group[0]<0x80) { // if ASCII (EBCDIC small letter 'a' starts at 0x81)
+       g = strdup(group);
+       if (g == NULL)
+          return 0;
+       ssh_string_to_ebcdic(g,g,strlen(g));
+       group = (const char*)g;
+    }
+    if (object[0]<0x80) { // if ASCII (EBCDIC small letter 'a' starts at 0x81)
+       o = strdup(object);
+       if (o == NULL) {
+          if (g != NULL)
+              free(g);
+          return 0;
+       }
+       ssh_string_to_ebcdic(o,o,strlen(o));
+       object = (const char*)o;
+    }
+#endif
+
     z = group;
     do {
         a = strchr(z, ',');
         if (a == NULL) {
             if (strcmp(z, object) == 0) {
+                #ifdef __EBCDIC__
+                // do not remove because o == object
+                if (g != NULL)
+                    free(g);
+                if (o != NULL)
+                    free(o);
+                #endif
                 return 1;
             }
+            #ifdef __EBCDIC__
+            if (g != NULL)
+                free(g);
+            if (o != NULL)
+                free(o);
+            #endif
             return 0;
         } else {
             if (strncmp(z, object, a - z) == 0) {
+                #ifdef __EBCDIC__
+                if (g != NULL)
+                    free(g);
+                if (o != NULL)
+                    free(o);
+                #endif
                 return 1;
             }
         }
@@ -1302,6 +1343,12 @@ int ssh_match_group(const char *group, const char *object)
     } while(1);
 
     /* not reached */
+    #ifdef __EBCDIC__
+    if (g != NULL)
+        free(g);
+    if (o != NULL)
+        free(o);
+    #endif
     return 0;
 }
 
