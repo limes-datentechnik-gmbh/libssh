@@ -48,6 +48,7 @@ static mbedtls_ecp_group_id ecdh_kex_type_to_curve(enum ssh_key_exchange_e kex_t
 
     return MBEDTLS_ECP_DP_NONE;
 }
+
 int ssh_client_ecdh_init(ssh_session session)
 {
     ssh_string client_pubkey = NULL;
@@ -57,16 +58,19 @@ int ssh_client_ecdh_init(ssh_session session)
 
     curve = ecdh_kex_type_to_curve(session->next_crypto->kex_type);
     if (curve == MBEDTLS_ECP_DP_NONE) {
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         return SSH_ERROR;
     }
 
     rc = ssh_buffer_add_u8(session->out_buffer, SSH2_MSG_KEX_ECDH_INIT);
     if (rc < 0) {
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         return SSH_ERROR;
     }
 
     session->next_crypto->ecdh_privkey = malloc(sizeof(mbedtls_ecp_keypair));
     if (session->next_crypto->ecdh_privkey == NULL) {
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         return SSH_ERROR;
     }
 
@@ -75,6 +79,7 @@ int ssh_client_ecdh_init(ssh_session session)
 
     rc = mbedtls_ecp_group_load(&grp, curve);
     if (rc != 0) {
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         rc = SSH_ERROR;
         goto out;
     }
@@ -86,6 +91,7 @@ int ssh_client_ecdh_init(ssh_session session)
                                  ssh_get_mbedtls_ctr_drbg_context());
 
     if (rc != 0) {
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         rc = SSH_ERROR;
         goto out;
     }
@@ -93,12 +99,14 @@ int ssh_client_ecdh_init(ssh_session session)
     client_pubkey = make_ecpoint_string(&grp,
             &session->next_crypto->ecdh_privkey->Q);
     if (client_pubkey == NULL) {
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         rc = SSH_ERROR;
         goto out;
     }
 
     rc = ssh_buffer_add_ssh_string(session->out_buffer, client_pubkey);
     if (rc < 0) {
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         rc = SSH_ERROR;
         goto out;
     }
@@ -110,6 +118,9 @@ int ssh_client_ecdh_init(ssh_session session)
     ssh_packet_set_callbacks(session, &ssh_ecdh_client_callbacks);
     session->dh_handshake_state = DH_STATE_INIT_SENT;
     rc = ssh_packet_send(session);
+    if (rc == SSH_ERROR) {
+        ssh_set_error(session, SSH_FATAL, "Unable to send ECDH parameters");
+    }
 
 out:
     mbedtls_ecp_group_free(&grp);

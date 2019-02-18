@@ -822,6 +822,7 @@ int ssh_set_client_kex(ssh_session session)
     len = strlen(kex);
     if (len + strlen(KEX_EXTENSION_CLIENT) + 2 < len) {
         /* Overflow */
+        ssh_set_error(session, SSH_FATAL, "Overflow in kex string detected");
         return SSH_ERROR;
     }
     kex_len = len + strlen(KEX_EXTENSION_CLIENT) + 2; /* comma, NULL */
@@ -918,9 +919,14 @@ int ssh_send_kex(ssh_session session, int server_kex) {
                        SSH2_MSG_KEXINIT,
                        16,
                        kex->cookie); /* cookie */
-  if (rc != SSH_OK)
+  if (rc != SSH_OK) {
+    ssh_set_error(session, SSH_FATAL,
+            "Unable to write to output buffer during kex send");
     goto error;
+  }
   if (ssh_hashbufout_add_cookie(session) < 0) {
+    ssh_set_error(session, SSH_FATAL,
+            "Unable to write kex cookie to buffer during kex send");
     goto error;
   }
 
@@ -929,6 +935,8 @@ int ssh_send_kex(ssh_session session, int server_kex) {
   for (i = 0; i < KEX_METHODS_SIZE; i++) {
     str = ssh_string_from_char(kex->methods[i]);
     if (str == NULL) {
+      ssh_set_error(session, SSH_FATAL,
+              "Unable to allocate kex method string during kex send");
       goto error;
     }
 #ifdef __EBCDIC__
@@ -936,9 +944,13 @@ int ssh_send_kex(ssh_session session, int server_kex) {
 #endif
 
     if (ssh_buffer_add_ssh_string(session->out_hashbuf, str) < 0) {
+      ssh_set_error(session, SSH_FATAL,
+              "Unable to write kex method string to hash buffer during kex send");
       goto error;
     }
     if (ssh_buffer_add_ssh_string(session->out_buffer, str) < 0) {
+      ssh_set_error(session, SSH_FATAL,
+              "Unable to write kex method string to outputbuffer during kex send");
       goto error;
     }
     ssh_string_free(str);
@@ -950,10 +962,14 @@ int ssh_send_kex(ssh_session session, int server_kex) {
                        0,
                        0);
   if (rc != SSH_OK) {
+    ssh_set_error(session, SSH_FATAL,
+            "Unable to write trailer to output buffer during kex send");
     goto error;
   }
 
   if (ssh_packet_send(session) == SSH_ERROR) {
+    ssh_set_error(session, SSH_FATAL,
+            "Unable to send kex packet");
     return -1;
   }
 

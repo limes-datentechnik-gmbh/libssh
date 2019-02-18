@@ -136,6 +136,8 @@ static int callback_receive_banner(const void *data, size_t len, void *user)
             if (cmp == 0) {
                 str = strdup(buffer);
                 if (str == NULL) {
+                    ssh_set_error(session, SSH_FATAL,
+                            "Allocation failed when trying to copy server banner");
                     return SSH_ERROR;
                 }
                 /* number of bytes read */
@@ -294,6 +296,7 @@ static int dh_handshake(ssh_session session) {
           break;
 #endif
         default:
+          ssh_set_error(session, SSH_FATAL, "Unknown KEX algorithm");
           rc = SSH_ERROR;
       }
 
@@ -417,6 +420,8 @@ static void ssh_client_connection_callback(ssh_session session)
             break;
         case SSH_SESSION_STATE_BANNER_RECEIVED:
             if (session->serverbanner == NULL) {
+                ssh_set_error(session, SSH_FATAL,
+                        "Server banner is NULL unexpectedly");
                 goto error;
             }
             set_status(session, 0.4f);

@@ -93,6 +93,7 @@ int ssh_client_dhgex_init(ssh_session session)
     }
     return rc;
 error:
+    ssh_set_error(session, SSH_FATAL,"Unable to initialize DHGEX parameters");
     ssh_dh_cleanup(session->next_crypto);
     return SSH_ERROR;
 }

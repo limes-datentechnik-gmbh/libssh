@@ -529,8 +529,12 @@ int ssh_client_dh_init(ssh_session session){
   session->dh_handshake_state = DH_STATE_INIT_SENT;
 
   rc = ssh_packet_send(session);
+  if (rc != SSH_OK) {
+    ssh_set_error(session, SSH_FATAL, "Unable to send DH parameters");
+  }
   return rc;
 error:
+  ssh_set_error(session, SSH_FATAL, "Unable to generate secret DH parameters");
   ssh_dh_cleanup(session->next_crypto);
   return SSH_ERROR;
 }

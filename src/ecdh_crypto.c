@@ -65,18 +65,21 @@ int ssh_client_ecdh_init(ssh_session session){
   rc = ssh_buffer_add_u8(session->out_buffer, SSH2_MSG_KEX_ECDH_INIT);
   if (rc < 0) {
       BN_CTX_free(ctx);
+      ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
       return SSH_ERROR;
   }
 
   curve = ecdh_kex_type_to_curve(session->next_crypto->kex_type);
   if (curve == SSH_ERROR) {
       BN_CTX_free(ctx);
+      ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
       return SSH_ERROR;
   }
 
   key = EC_KEY_new_by_curve_name(curve);
   if (key == NULL) {
       BN_CTX_free(ctx);
+      ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
       return SSH_ERROR;
   }
   group = EC_KEY_get0_group(key);
@@ -91,6 +94,7 @@ int ssh_client_ecdh_init(ssh_session session){
   if (client_pubkey == NULL) {
       BN_CTX_free(ctx);
       EC_KEY_free(key);
+      ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
       return SSH_ERROR;
   }
 
@@ -102,6 +106,7 @@ int ssh_client_ecdh_init(ssh_session session){
   if (rc < 0) {
       EC_KEY_free(key);
       ssh_string_free(client_pubkey);
+      ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
       return SSH_ERROR;
   }
 
@@ -113,6 +118,9 @@ int ssh_client_ecdh_init(ssh_session session){
   session->dh_handshake_state = DH_STATE_INIT_SENT;
 
   rc = ssh_packet_send(session);
+  if (rc == SSH_ERROR) {
+      ssh_set_error(session, SSH_FATAL, "Unable to send ECDH parameters");
+  }
 
   return rc;
 }

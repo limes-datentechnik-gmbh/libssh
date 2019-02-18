@@ -62,12 +62,14 @@ int ssh_client_ecdh_init(ssh_session session)
     curve = ecdh_kex_type_to_curve(session->next_crypto->kex_type);
     if (curve == NULL) {
         rc = SSH_ERROR;
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         goto out;
     }
 
     rc = ssh_buffer_add_u8(session->out_buffer, SSH2_MSG_KEX_ECDH_INIT);
     if (rc < 0) {
         rc = SSH_ERROR;
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         goto out;
     }
 
@@ -77,12 +79,14 @@ int ssh_client_ecdh_init(ssh_session session)
                           curve);
     if (err) {
         rc = SSH_ERROR;
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         goto out;
     }
 
     err = gcry_pk_genkey(&key, param);
     if (err) {
         rc = SSH_ERROR;
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         goto out;
     }
 
@@ -92,12 +96,14 @@ int ssh_client_ecdh_init(ssh_session session)
                                          GCRYMPI_FMT_STD);
     if (client_pubkey == NULL) {
         rc = SSH_ERROR;
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         goto out;
     }
 
     rc = ssh_buffer_add_ssh_string(session->out_buffer, client_pubkey);
     if (rc < 0) {
         rc = SSH_ERROR;
+        ssh_set_error(session, SSH_FATAL, "Unable to initialize ECDH parameters");
         goto out;
     }
 
@@ -111,6 +117,9 @@ int ssh_client_ecdh_init(ssh_session session)
     session->dh_handshake_state = DH_STATE_INIT_SENT;
 
     rc = ssh_packet_send(session);
+    if (rc == SSH_ERROR) {
+        ssh_set_error(session, SSH_FATAL, "Unable to send ECDH parameters");
+    }
 
  out:
     gcry_sexp_release(param);

@@ -81,6 +81,9 @@ int ssh_client_curve25519_init(ssh_session session){
   ssh_packet_set_callbacks(session, &ssh_curve25519_client_callbacks);
   session->dh_handshake_state = DH_STATE_INIT_SENT;
   rc = ssh_packet_send(session);
+  if (rc != SSH_OK) {
+      ssh_set_error(session, SSH_FATAL, "Unable to send curve25519 parameters");
+  }
 
   return rc;
 }
