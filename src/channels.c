@@ -483,7 +483,7 @@ SSH_PACKET_CALLBACK(channel_rcv_data){
   ssh_buffer buf;
   size_t len;
   int is_stderr;
-  int rest;
+  int consumed;
   (void)user;
 
   if(type==SSH2_MSG_CHANNEL_DATA)
@@ -560,17 +560,17 @@ SSH_PACKET_CALLBACK(channel_rcv_data){
       if (ssh_buffer_get(buf) == NULL) {
           break;
       }
-      rest = ssh_callbacks_iterate_exec(channel_data_function,
+      consumed = ssh_callbacks_iterate_exec(channel_data_function,
                                         channel->session,
                                         channel,
                                         ssh_buffer_get(buf),
                                         ssh_buffer_get_len(buf),
                                         is_stderr);
-      if (rest > 0) {
+      if (consumed > 0) {
           if (channel->counter != NULL) {
-              channel->counter->in_bytes += rest;
+              channel->counter->in_bytes += consumed;
           }
-          ssh_buffer_pass_bytes(buf, rest);
+          ssh_buffer_pass_bytes(buf, consumed);
       }
   }
   ssh_callbacks_iterate_end();
