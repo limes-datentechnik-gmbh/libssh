@@ -612,39 +612,39 @@ SSH_PACKET_CALLBACK(channel_rcv_eof) {
 }
 
 SSH_PACKET_CALLBACK(channel_rcv_close) {
-	ssh_channel channel;
-	(void)user;
-	(void)type;
+    ssh_channel channel;
+    (void)user;
+    (void)type;
 
-	channel = channel_from_msg(session,packet);
-	if (channel == NULL) {
-		SSH_LOG(SSH_LOG_FUNCTIONS, "%s", ssh_get_error(session));
+    channel = channel_from_msg(session,packet);
+    if (channel == NULL) {
+        SSH_LOG(SSH_LOG_FUNCTIONS, "%s", ssh_get_error(session));
 
-		return SSH_PACKET_USED;
-	}
+        return SSH_PACKET_USED;
+    }
 
-	SSH_LOG(SSH_LOG_PACKET,
-			"Received close on channel (%d:%d)",
-			channel->local_channel,
-			channel->remote_channel);
+    SSH_LOG(SSH_LOG_PACKET,
+            "Received close on channel (%d:%d)",
+            channel->local_channel,
+            channel->remote_channel);
 
-	if ((channel->stdout_buffer &&
-			ssh_buffer_get_len(channel->stdout_buffer) > 0) ||
-			(channel->stderr_buffer &&
-					ssh_buffer_get_len(channel->stderr_buffer) > 0)) {
-		channel->delayed_close = 1;
-	} else {
-		channel->state = SSH_CHANNEL_STATE_CLOSED;
-	}
-	if (channel->remote_eof == 0) {
-		SSH_LOG(SSH_LOG_PACKET,
-				"Remote host not polite enough to send an eof before close");
-	}
-	channel->remote_eof = 1;
-	/*
-	 * The remote eof doesn't break things if there was still data into read
-	 * buffer because the eof is ignored until the buffer is empty.
-	 */
+    if ((channel->stdout_buffer &&
+            ssh_buffer_get_len(channel->stdout_buffer) > 0) ||
+            (channel->stderr_buffer &&
+                    ssh_buffer_get_len(channel->stderr_buffer) > 0)) {
+        channel->delayed_close = 1;
+    } else {
+        channel->state = SSH_CHANNEL_STATE_CLOSED;
+    }
+    if (channel->remote_eof == 0) {
+        SSH_LOG(SSH_LOG_PACKET,
+                "Remote host not polite enough to send an eof before close");
+    }
+    channel->remote_eof = 1;
+    /*
+     * The remote eof doesn't break things if there was still data into read
+     * buffer because the eof is ignored until the buffer is empty.
+     */
 
     ssh_callbacks_execute_list(channel->callbacks,
                                ssh_channel_callbacks,
@@ -652,11 +652,11 @@ SSH_PACKET_CALLBACK(channel_rcv_close) {
                                channel->session,
                                channel);
 
-	channel->flags |= SSH_CHANNEL_FLAG_CLOSED_REMOTE;
-	if(channel->flags & SSH_CHANNEL_FLAG_FREED_LOCAL)
-	  ssh_channel_do_free(channel);
+    channel->flags |= SSH_CHANNEL_FLAG_CLOSED_REMOTE;
+    if (channel->flags & SSH_CHANNEL_FLAG_FREED_LOCAL)
+        ssh_channel_do_free(channel);
 
-	return SSH_PACKET_USED;
+    return SSH_PACKET_USED;
 }
 
 SSH_PACKET_CALLBACK(channel_rcv_request) {
