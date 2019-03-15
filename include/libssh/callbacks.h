@@ -451,16 +451,16 @@ typedef struct ssh_socket_callbacks_struct *ssh_socket_callbacks;
  *
  * @param va_args parameters to be passed
  */
-#define ssh_callbacks_execute_list(list, cbtype, c, ...)      \
-    do {                                                      \
-        struct ssh_iterator *i = ssh_list_get_iterator(list); \
-        cbtype cb;                                            \
-        while (i != NULL){                                    \
-            cb = ssh_iterator_value(cbtype, i);               \
-            if (ssh_callbacks_exists(cb, c))                  \
-                cb-> c (__VA_ARGS__, cb->userdata);           \
-            i = i->next;                                      \
-        }                                                     \
+#define ssh_callbacks_execute_list(list, cbtype, c, ...)          \
+    do {                                                          \
+        struct ssh_iterator *_cb_i = ssh_list_get_iterator(list); \
+        cbtype cb;                                                \
+        while (_cb_i != NULL){                                    \
+            cb = ssh_iterator_value(cbtype, _cb_i);               \
+            if (ssh_callbacks_exists(cb, c))                      \
+                cb-> c (__VA_ARGS__, cb->userdata);               \
+            _cb_i = _cb_i->next;                                  \
+        }                                                         \
     } while(0)
 
 /**
