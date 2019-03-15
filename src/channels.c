@@ -589,6 +589,46 @@ SSH_PACKET_CALLBACK(channel_rcv_data){
   return SSH_PACKET_USED;
 }
 
+static int ssh_callbacks_call_lastdata(ssh_channel channel) {
+   ssh_buffer buf[2];
+   uint32_t buflen;
+   int consumed, i, called = 0;
+
+   buf[0] = channel->stdout_buffer;
+   buf[1] = channel->stderr_buffer;
+   for (i = 0; i < sizeof(buf)/sizeof(*buf); i++) {
+       ssh_callbacks_iterate(channel->callbacks,
+                             ssh_channel_callbacks,
+                             channel_lastdata_function) {
+           buflen = ssh_buffer_get_len(buf[i]);
+           if (buf[i] == NULL || buflen == 0) {
+               break;
+           }
+           do {
+               buflen = ssh_buffer_get_len(buf[i]);
+               consumed = ssh_callbacks_iterate_exec(channel_lastdata_function,
+                                                 channel->session,
+                                                 channel,
+                                                 ssh_buffer_get(buf[i]),
+                                                 buflen,
+                                                 buf[i] == channel->stderr_buffer);
+               if (consumed > 0) {
+                   if (consumed > buflen)
+                       consumed = buflen;
+                   if (channel->counter != NULL) {
+                       channel->counter->in_bytes += consumed;
+                   }
+                   ssh_buffer_pass_bytes(buf[i], consumed);
+               }
+           } while (consumed > 0 && consumed < buflen);
+           called = 1;
+       }
+       ssh_callbacks_iterate_end();
+   }
+
+   return called;
+}
+
 SSH_PACKET_CALLBACK(channel_rcv_eof) {
   ssh_channel channel;
   (void)user;
@@ -608,6 +648,8 @@ SSH_PACKET_CALLBACK(channel_rcv_eof) {
   /* channel->remote_window = 0; */
   channel->remote_eof = 1;
 
+  ssh_callbacks_call_lastdata(channel);
+
   ssh_callbacks_execute_list(channel->callbacks,
                              ssh_channel_callbacks,
                              channel_eof_function,
@@ -619,6 +661,8 @@ SSH_PACKET_CALLBACK(channel_rcv_eof) {
 
 SSH_PACKET_CALLBACK(channel_rcv_close) {
     ssh_channel channel;
+    int lastdata_called, stdout_hasdata, stderr_hasdata;
+    uint32_t stdout_buflen, stderr_buflen;
     (void)user;
     (void)type;
 
@@ -634,10 +678,14 @@ SSH_PACKET_CALLBACK(channel_rcv_close) {
             channel->local_channel,
             channel->remote_channel);
 
-    if ((channel->stdout_buffer &&
-            ssh_buffer_get_len(channel->stdout_buffer) > 0) ||
-            (channel->stderr_buffer &&
-                    ssh_buffer_get_len(channel->stderr_buffer) > 0)) {
+    lastdata_called = ssh_callbacks_call_lastdata(channel);
+
+    stdout_buflen = ssh_buffer_get_len(channel->stdout_buffer);
+    stderr_buflen = ssh_buffer_get_len(channel->stderr_buffer);
+    stdout_hasdata = (channel->stdout_buffer && stdout_buflen > 0);
+    stderr_hasdata = (channel->stderr_buffer && stderr_buflen > 0);
+
+    if (!lastdata_called && (stdout_hasdata || stderr_hasdata)) {
         channel->delayed_close = 1;
     } else {
         channel->state = SSH_CHANNEL_STATE_CLOSED;
@@ -700,6 +748,7 @@ SSH_PACKET_CALLBACK(channel_rcv_request) {
         }
         SSH_LOG(SSH_LOG_PACKET, "received exit-status %d", channel->exit_status);
 
+        ssh_callbacks_call_lastdata(channel);
         ssh_callbacks_execute_list(channel->callbacks,
                                    ssh_channel_callbacks,
                                    channel_exit_status_function,
@@ -768,6 +817,7 @@ SSH_PACKET_CALLBACK(channel_rcv_request) {
 
 		SSH_LOG(SSH_LOG_PACKET,
 				"Remote connection closed by signal SIG %s %s", sig, core);
+		ssh_callbacks_call_lastdata(channel);
 		ssh_callbacks_execute_list(channel->callbacks,
                                    ssh_channel_callbacks,
                                    channel_exit_signal_function,

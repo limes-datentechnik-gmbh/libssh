@@ -788,6 +788,15 @@ struct ssh_channel_callbacks_struct {
    */
   ssh_channel_data_callback channel_data_function;
   /**
+   * This functions will be called when the channel was closed by the
+   * remote host and there is still data in the channel buffers that
+   * previous invocations of the channel_data_function were unable to
+   * process. This is the last chance to process any remaining data.
+   * The function is called repeatedly until all data is consumed or
+   * 0 is returned (i.e. no more data can be processed).
+   */
+  ssh_channel_data_callback channel_lastdata_function;
+  /**
    * This functions will be called when the channel has received an EOF.
    */
   ssh_channel_eof_callback channel_eof_function;
