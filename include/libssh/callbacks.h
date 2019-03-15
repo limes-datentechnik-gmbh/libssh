@@ -783,6 +783,8 @@ struct ssh_channel_callbacks_struct {
   void *userdata;
   /**
    * This functions will be called when there is data available.
+   * The function is called repeatedly until all data is consumed or
+   * 0 is returned (i.e. no more data can be processed).
    */
   ssh_channel_data_callback channel_data_function;
   /**

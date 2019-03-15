@@ -481,6 +481,7 @@ SSH_PACKET_CALLBACK(channel_rcv_data){
   ssh_channel channel;
   ssh_string str;
   ssh_buffer buf;
+  uint32_t buflen;
   size_t len;
   int is_stderr;
   int consumed;
@@ -557,21 +558,26 @@ SSH_PACKET_CALLBACK(channel_rcv_data){
   ssh_callbacks_iterate(channel->callbacks,
                         ssh_channel_callbacks,
                         channel_data_function) {
-      if (ssh_buffer_get(buf) == NULL) {
+      if (buf == NULL) {
           break;
       }
-      consumed = ssh_callbacks_iterate_exec(channel_data_function,
-                                        channel->session,
-                                        channel,
-                                        ssh_buffer_get(buf),
-                                        ssh_buffer_get_len(buf),
-                                        is_stderr);
-      if (consumed > 0) {
-          if (channel->counter != NULL) {
-              channel->counter->in_bytes += consumed;
+      do {
+          buflen = ssh_buffer_get_len(buf);
+          consumed = ssh_callbacks_iterate_exec(channel_data_function,
+                                            channel->session,
+                                            channel,
+                                            ssh_buffer_get(buf),
+                                            buflen,
+                                            is_stderr);
+          if (consumed > 0) {
+              if (consumed > buflen)
+                  consumed = buflen;
+              if (channel->counter != NULL) {
+                  channel->counter->in_bytes += consumed;
+              }
+              ssh_buffer_pass_bytes(buf, consumed);
           }
-          ssh_buffer_pass_bytes(buf, consumed);
-      }
+      } while (consumed > 0 && consumed < buflen);
   }
   ssh_callbacks_iterate_end();
 
