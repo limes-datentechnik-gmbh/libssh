@@ -485,13 +485,13 @@ LIBSSH_API ssize_t sftp_read(sftp_file file, void *buf, size_t count);
  * @brief Start an asynchronous read from a file using an opened sftp file handle.
  *
  * Its goal is to avoid the slowdowns related to the request/response pattern
- * of a synchronous read. To do so, you must call 2 functions:
+ * of a synchronous read. To do so, you must call a pair of functions:
  *
- * sftp_async_read_begin() and sftp_async_read().
+ * sftp_async_read_begin() and either sftp_async_read() or sftp_async_readmsg().
  *
  * The first step is to call sftp_async_read_begin(). This function returns a
- * request identifier. The second step is to call sftp_async_read() using the
- * returned identifier.
+ * request identifier. The second step is to call either sftp_async_read() or
+ * sftp_async_readmsg() using the returned identifier.
  *
  * @param file          The opened sftp file handle to be read from.
  *
@@ -505,24 +505,25 @@ LIBSSH_API ssize_t sftp_read(sftp_file file, void *buf, size_t count);
  *
  * @warning             A call to sftp_async_read_begin() sends a request to
  *                      the server. When the server answers, libssh allocates
- *                      memory to store it until sftp_async_read() is called.
- *                      Not calling sftp_async_read() will lead to memory
- *                      leaks.
+ *                      memory to store it until sftp_async_read() or
+ *                      sftp_async_readmsg() is called. Failing to do so will
+ *                      lead to memory leaks.
  *
  * @see                 sftp_async_read()
+ * @see                 sftp_async_readmsg()
  * @see                 sftp_open()
  */
 LIBSSH_API int sftp_async_read_begin(sftp_file file, uint32_t len);
 
 /**
- * @brief Wait for an asynchronous read to complete and save the data.
+ * @brief Wait for an asynchronous read to complete and save the data to the provided buffer.
  *
  * @param file          The opened sftp file handle to be read from.
  *
- * @param data          Pointer to buffer to recieve read data.
+ * @param data          Pointer to buffer to store received data.
  *
- * @param len           Size of the buffer in bytes. It should be bigger or
- *                      equal to the length parameter of the
+ * @param len           Size of the buffer in bytes. It must be larger or
+ *                      equal to the length parameter of the corresponding
  *                      sftp_async_read_begin() call.
  *
  * @param id            The identifier returned by the sftp_async_read_begin()
@@ -626,7 +627,7 @@ LIBSSH_API ssize_t sftp_write(sftp_file file, const void *buf, size_t count);
  * The first step is to call sftp_async_write(). This function returns a
  * request identifier (parameter @p id). The second step is to call
  * sftp_async_write_end() to receive the server's acknowledgment, using the
- * returned identifier.
+ * returned identifier. Multiple writes can be in transit at the same time.
  *
  * @param file          Open sftp file handle to write to.
  *
@@ -634,7 +635,7 @@ LIBSSH_API ssize_t sftp_write(sftp_file file, const void *buf, size_t count);
  *
  * @param count         Size of buffer in bytes.
  *
- * @param id            An identifier corresponding to the sent request (valid only if returns SSH_OK)
+ * @param id            An identifier corresponding to the sent request (valid only if SSH_OK is returned)
  *
  * @return              SSH_OK on success, SSH_ERROR if an error occured
  *
@@ -654,7 +655,7 @@ LIBSSH_API int sftp_async_write(sftp_file file, const void *buf, size_t count, u
  *
  * @param file          The opened sftp file handle previously written to.
  *
- * @param id            The identifier returned by the sftp_async_read_begin()
+ * @param id            The identifier returned by the sftp_async_write()
  *                      function.
  *
  * @param blocking      Wait for the server acknowledge if non-zero
