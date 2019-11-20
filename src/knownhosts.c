@@ -632,6 +632,9 @@ int ssh_session_export_known_hosts_entry(ssh_session session,
     char entry_buf[4096] = {0};
     char *b64_key = NULL;
     int rc;
+#ifdef __EBCDIC__
+    char *str;
+#endif
 
     if (pentry_string == NULL) {
         ssh_set_error_invalid(session);
@@ -669,11 +672,28 @@ int ssh_session_export_known_hosts_entry(ssh_session session,
         return SSH_ERROR;
     }
 
+#ifdef __EBCDIC__
+    str = strdup(server_pubkey->type_c);
+    if (str == NULL) {
+        ssh_set_error(session, SSH_FATAL, "Memory allocation failed for key type");
+        SAFE_FREE(host);
+        SAFE_FREE(b64_key);
+        return SSH_ERROR;
+    }
+    ssh_string_to_ebcdic(str, str, strlen(str));
+    snprintf(entry_buf, sizeof(entry_buf),
+               "%s %s %s\n",
+                host,
+                str,
+                b64_key);
+    free(str);
+#else
     snprintf(entry_buf, sizeof(entry_buf),
                 "%s %s %s\n",
                 host,
                 server_pubkey->type_c,
                 b64_key);
+#endif
 
     SAFE_FREE(host);
     SAFE_FREE(b64_key);
