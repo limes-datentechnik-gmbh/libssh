@@ -93,7 +93,7 @@ static void torture_knownhosts_parse_line_rsa(void **state) {
 
     rc = ssh_known_hosts_parse_line("localhost",
                                     LOCALHOST_RSA_LINE,
-                                    &entry);
+                                    &entry, __LINE__);
     assert_int_equal(rc, SSH_OK);
 
     assert_string_equal(entry->hostname, "localhost");
@@ -106,7 +106,7 @@ static void torture_knownhosts_parse_line_rsa(void **state) {
 
     rc = ssh_known_hosts_parse_line("127.0.0.1",
                                     LOCALHOST_RSA_LINE,
-                                    &entry);
+                                    &entry, __LINE__);
     assert_int_equal(rc, SSH_OK);
 
     assert_string_equal(entry->hostname, "127.0.0.1");
@@ -126,7 +126,7 @@ static void torture_knownhosts_parse_line_ecdsa(void **state) {
 
     rc = ssh_known_hosts_parse_line("localhost",
                                     LOCALHOST_ECDSA_SHA1_NISTP256_LINE,
-                                    &entry);
+                                    &entry, __LINE__);
     assert_int_equal(rc, SSH_OK);
 
     assert_string_equal(entry->hostname, "localhost");
@@ -145,7 +145,7 @@ static void torture_knownhosts_parse_line_default_ed25519(void **state) {
 
     rc = ssh_known_hosts_parse_line("localhost",
                                     LOCALHOST_DEFAULT_ED25519,
-                                    &entry);
+                                    &entry, __LINE__);
     assert_int_equal(rc, SSH_OK);
 
     assert_string_equal(entry->hostname, "localhost");
@@ -164,7 +164,7 @@ static void torture_knownhosts_parse_line_port_ed25519(void **state) {
 
     rc = ssh_known_hosts_parse_line("[localhost]:2222",
                                     LOCALHOST_PORT_ED25519,
-                                    &entry);
+                                    &entry, __LINE__);
     assert_int_equal(rc, SSH_OK);
 
     assert_string_equal(entry->hostname, "[localhost]:2222");
@@ -183,7 +183,7 @@ static void torture_knownhosts_parse_line_pattern_ed25519(void **state) {
 
     rc = ssh_known_hosts_parse_line("localhost",
                                     LOCALHOST_PATTERN_ED25519,
-                                    &entry);
+                                    &entry, __LINE__);
     assert_int_equal(rc, SSH_OK);
 
     assert_string_equal(entry->hostname, "localhost");
@@ -202,7 +202,7 @@ static void torture_knownhosts_parse_line_hashed_ed25519(void **state) {
 
     rc = ssh_known_hosts_parse_line("localhost",
                                     LOCALHOST_HASHED_ED25519,
-                                    &entry);
+                                    &entry, __LINE__);
     assert_int_equal(rc, SSH_OK);
 
     assert_string_equal(entry->hostname, "localhost");

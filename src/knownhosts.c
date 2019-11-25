@@ -166,6 +166,7 @@ static int known_hosts_read_line(FILE *fp,
             continue;
         }
 
+        // TODO: must be moved before if
         *lineno += 1;
         len = strlen(buf);
         if (buf_len != NULL) {
@@ -174,6 +175,8 @@ static int known_hosts_read_line(FILE *fp,
         if (buf[len - 1] == '\n' || feof(fp)) {
             return 0;
         } else {
+            SSH_LOG(SSH_LOG_WARN, "Line %d is too long (max = %d)",
+                    (int)*lineno, (int)buf_size);
             errno = E2BIG;
             return -1;
         }
@@ -204,12 +207,15 @@ static int ssh_known_hosts_read_entries(const char *match,
                 filename, strerror(errno));
         /* The missing file is not an error here */
         return SSH_OK;
+    } else {
+        SSH_LOG(SSH_LOG_DEBUG, "Opened the known_hosts file '%s'", filename);
     }
 
     if (*entries == NULL) {
         *entries = ssh_list_new();
         if (*entries == NULL) {
             fclose(fp);
+            SSH_LOG(SSH_LOG_WARN, "Unable to allocate memory for known_hosts entries");
             return SSH_ERROR;
         }
     }
@@ -236,12 +242,14 @@ static int ssh_known_hosts_read_entries(const char *match,
         /* Skip lines starting with markers (@cert-authority, @revoked):
          * we do not completely support them anyway */
         if (p[0] == '@') {
+            SSH_LOG(SSH_LOG_TRACE, "Skipped line %d with marker (unsupported)", (int)lineno);
             continue;
         }
 
         rc = ssh_known_hosts_parse_line(match,
                                         line,
-                                        &entry);
+                                        &entry,
+                                        lineno);
         if (rc == SSH_AGAIN) {
             continue;
         } else if (rc != SSH_OK) {
@@ -251,9 +259,11 @@ static int ssh_known_hosts_read_entries(const char *match,
     }
 
     fclose(fp);
+    SSH_LOG(SSH_LOG_DEBUG, "Closed the known_hosts file '%s'", filename);
     return SSH_OK;
 error:
     fclose(fp);
+    SSH_LOG(SSH_LOG_DEBUG, "Closed the known_hosts file '%s' after parse error", filename);
     return SSH_ERROR;
 }
 
@@ -311,6 +321,8 @@ struct ssh_list *ssh_known_hosts_get_algorithms(ssh_session session)
     struct ssh_list *list = NULL;
     int list_error = 0;
     int rc;
+
+    SSH_LOG(SSH_LOG_TRACE, "Assembling list of preferred host key algos");
 
     if (session->opts.knownhosts == NULL ||
         session->opts.global_knownhosts == NULL) {
@@ -387,9 +399,11 @@ struct ssh_list *ssh_known_hosts_get_algorithms(ssh_session session)
         goto error;
     }
 
+    SSH_LOG(SSH_LOG_TRACE, "List contains %d algos", (int)ssh_list_count(list));
     return list;
 error:
     ssh_list_free(list);
+    SSH_LOG(SSH_LOG_TRACE, "Error while generating list");
     return NULL;
 }
 
@@ -408,13 +422,17 @@ error:
  *                          entry structure. The user needs to free the memory
  *                          using SSH_KNOWNHOSTS_ENTRY_FREE().
  *
+ * @param[in]  lineno       The line number in the known_hosts file
+ *
  * @return SSH_OK on success, SSH_ERROR otherwise.
  */
 int ssh_known_hosts_parse_line(const char *hostname,
                                const char *line,
-                               struct ssh_knownhosts_entry **entry)
+                               struct ssh_knownhosts_entry **entry,
+                               size_t lineno)
 {
     struct ssh_knownhosts_entry *e = NULL;
+    char key_type_str[32] = "";
     char *known_host = NULL;
     char *p;
     enum ssh_keytypes_e key_type;
@@ -423,6 +441,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
 
     known_host = strdup(line);
     if (known_host == NULL) {
+        SSH_LOG(SSH_LOG_WARN, "Cannot duplicate known_hosts line %d (out of memory)", (int)lineno);
         return SSH_ERROR;
     }
 
@@ -430,12 +449,14 @@ int ssh_known_hosts_parse_line(const char *hostname,
     p = strtok(known_host, " ");
     if (p == NULL ) {
         free(known_host);
+        SSH_LOG(SSH_LOG_DEBUG, "Ignoring line %d (host field missing)", (int)lineno);
         return SSH_AGAIN;
     }
 
     e = calloc(1, sizeof(struct ssh_knownhosts_entry));
     if (e == NULL) {
         free(known_host);
+        SSH_LOG(SSH_LOG_WARN, "Cannot allocate memory for knownhosts entry at line %d (out of memory)", (int)lineno);
         return SSH_ERROR;
     }
 
@@ -446,6 +467,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
         /* Hashed */
         if (p[0] == '|') {
             match = match_hashed_hostname(hostname, p);
+            SSH_LOG(SSH_LOG_TRACE, "Line %d matches hashed hostname '%s'", (int)lineno, hostname);
         }
 
         for (q = strtok(p, ",");
@@ -468,8 +490,14 @@ int ssh_known_hosts_parse_line(const char *hostname,
                 }
 
                 cmp = match_hostname(host_port, q, strlen(q));
+                if (cmp == 1) {
+                    SSH_LOG(SSH_LOG_TRACE, "Line %d matches hostname '%s' with port 22", (int)lineno, hostname);
+                }
             } else {
                 cmp = match_hostname(hostname, q, strlen(q));
+                if (cmp == 1) {
+                    SSH_LOG(SSH_LOG_TRACE, "Line %d matches hostname '%s'", (int)lineno, hostname);
+                }
             }
             if (cmp == 1) {
                 match = 1;
@@ -479,6 +507,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
         free(host_port);
 
         if (match == 0) {
+            SSH_LOG(SSH_LOG_TRACE, "Skipping line %d (doesn't match hostname '%s')", (int)lineno, hostname);
             rc = SSH_AGAIN;
             goto out;
         }
@@ -486,6 +515,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
         e->hostname = strdup(hostname);
         if (e->hostname == NULL) {
             rc = SSH_ERROR;
+            SSH_LOG(SSH_LOG_WARN, "Cannot duplicate hostname for entry of line %d (out of memory)", (int)lineno);
             goto out;
         }
     }
@@ -495,18 +525,21 @@ int ssh_known_hosts_parse_line(const char *hostname,
     known_host = strdup(line);
     if (known_host == NULL) {
         rc = SSH_ERROR;
+        SSH_LOG(SSH_LOG_WARN, "Cannot duplicate known_hosts line %d again (out of memory)", (int)lineno);
         goto out;
     }
 
     p = strtok(known_host, " ");
     if (p == NULL ) {
         rc = SSH_AGAIN;
+        SSH_LOG(SSH_LOG_DEBUG, "Ignoring line %d (host field missing)", (int)lineno);
         goto out;
     }
 
     e->unparsed = strdup(p);
     if (e->unparsed == NULL) {
         rc = SSH_ERROR;
+        SSH_LOG(SSH_LOG_WARN, "Cannot duplicate unparsed known_hosts line %d (out of memory)", (int)lineno);
         goto out;
     }
 
@@ -514,12 +547,16 @@ int ssh_known_hosts_parse_line(const char *hostname,
     p = strtok(NULL, " ");
     if (p == NULL) {
         rc = SSH_AGAIN;
+        SSH_LOG(SSH_LOG_DEBUG, "Ignoring line %d, host '%s' (keytype field missing)", (int)lineno, hostname);
         goto out;
     }
 
+    strncpy(key_type_str, p, sizeof(key_type_str));
+    key_type_str[sizeof(key_type_str)-1] = '\0';
+
     key_type = ssh_key_type_from_name(p);
     if (key_type == SSH_KEYTYPE_UNKNOWN) {
-        SSH_LOG(SSH_LOG_WARN, "key type '%s' unknown!", p);
+        SSH_LOG(SSH_LOG_WARN, "Ignoring line %d, host '%s' (key type '%s' unknown)", (int)lineno, hostname, p);
         rc = SSH_AGAIN;
         goto out;
     }
@@ -528,6 +565,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
     p = strtok(NULL, " ");
     if (p == NULL) {
         rc = SSH_AGAIN;
+        SSH_LOG(SSH_LOG_DEBUG, "Ignoring line %d, host '%s', type '%s' (public key field missing)", (int)lineno, hostname, key_type_str);
         goto out;
     }
 
@@ -536,8 +574,9 @@ int ssh_known_hosts_parse_line(const char *hostname,
                                       &e->publickey);
     if (rc != SSH_OK) {
         SSH_LOG(SSH_LOG_WARN,
-                "Failed to parse %s key for entry: %s!",
-                ssh_key_type_to_char(key_type),
+                "Failed to parse %s key for entry at line %d: %s!",
+                key_type_str,
+                (int)lineno,
                 e->unparsed);
         rc = SSH_AGAIN;
         goto out;
@@ -551,11 +590,13 @@ int ssh_known_hosts_parse_line(const char *hostname,
             e->comment = strdup(p);
             if (e->comment == NULL) {
                 rc = SSH_ERROR;
+                SSH_LOG(SSH_LOG_WARN, "Cannot duplicate comment from line %d (out of memory)", (int)lineno);
                 goto out;
             }
         }
     }
 
+    SSH_LOG(SSH_LOG_DEBUG, "Parsed line %d, host '%s', type '%s' successfully", (int)lineno, hostname, key_type_str);
     *entry = e;
     SAFE_FREE(known_host);
 
@@ -863,17 +904,21 @@ ssh_known_hosts_check_server_key(const char *hosts_entry,
     enum ssh_known_hosts_e found = SSH_KNOWN_HOSTS_UNKNOWN;
     int rc;
 
+    SSH_LOG(SSH_LOG_TRACE, "Validating server hostkey using '%s'", filename);
+
     rc = ssh_known_hosts_read_entries(hosts_entry,
                                       filename,
                                       &entry_list);
     if (rc != 0) {
         ssh_list_free(entry_list);
+        SSH_LOG(SSH_LOG_WARN, "Parsing known hosts file failed '%s'", filename);
         return SSH_KNOWN_HOSTS_UNKNOWN;
     }
 
     it = ssh_list_get_iterator(entry_list);
     if (it == NULL) {
         ssh_list_free(entry_list);
+        SSH_LOG(SSH_LOG_WARN, "Unable to obtain list iterator");
         return SSH_KNOWN_HOSTS_UNKNOWN;
     }
 
@@ -885,6 +930,9 @@ ssh_known_hosts_check_server_key(const char *hosts_entry,
 
         cmp = ssh_key_cmp(server_key, entry->publickey, SSH_KEY_CMP_PUBLIC);
         if (cmp == 0) {
+            SSH_LOG(SSH_LOG_TRACE, "Server key (%s) matches key (%s) in known hosts file",
+                    ssh_key_type_to_char(ssh_key_type(server_key)),
+                    ssh_key_type_to_char(ssh_key_type(entry->publickey)));
             found = SSH_KNOWN_HOSTS_OK;
             if (pentry != NULL) {
                 *pentry = entry;
