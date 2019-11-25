@@ -462,7 +462,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
                 if (host_port == NULL) {
                     host_port = ssh_hostport(hostname, 22);
                     if (host_port == NULL) {
-                        rc = SSH_ERROR;
+                        rc = SSH_AGAIN;
                         goto out;
                     }
                 }
@@ -500,7 +500,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
 
     p = strtok(known_host, " ");
     if (p == NULL ) {
-        rc = SSH_ERROR;
+        rc = SSH_AGAIN;
         goto out;
     }
 
@@ -513,21 +513,21 @@ int ssh_known_hosts_parse_line(const char *hostname,
     /* pubkey type */
     p = strtok(NULL, " ");
     if (p == NULL) {
-        rc = SSH_ERROR;
+        rc = SSH_AGAIN;
         goto out;
     }
 
     key_type = ssh_key_type_from_name(p);
     if (key_type == SSH_KEYTYPE_UNKNOWN) {
         SSH_LOG(SSH_LOG_WARN, "key type '%s' unknown!", p);
-        rc = SSH_ERROR;
+        rc = SSH_AGAIN;
         goto out;
     }
 
     /* public key */
     p = strtok(NULL, " ");
     if (p == NULL) {
-        rc = SSH_ERROR;
+        rc = SSH_AGAIN;
         goto out;
     }
 
@@ -539,6 +539,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
                 "Failed to parse %s key for entry: %s!",
                 ssh_key_type_to_char(key_type),
                 e->unparsed);
+        rc = SSH_AGAIN;
         goto out;
     }
 
