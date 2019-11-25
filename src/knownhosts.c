@@ -430,7 +430,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
     p = strtok(known_host, " ");
     if (p == NULL ) {
         free(known_host);
-        return SSH_ERROR;
+        return SSH_AGAIN;
     }
 
     e = calloc(1, sizeof(struct ssh_knownhosts_entry));
