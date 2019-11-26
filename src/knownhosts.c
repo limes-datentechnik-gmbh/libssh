@@ -930,9 +930,17 @@ ssh_known_hosts_check_server_key(const char *hosts_entry,
 
         cmp = ssh_key_cmp(server_key, entry->publickey, SSH_KEY_CMP_PUBLIC);
         if (cmp == 0) {
+            char server_keytype[32] = "";
+            char client_keytype[32] = "";
+            snprintf(server_keytype, sizeof(server_keytype), "%s", ssh_key_type_to_char(ssh_key_type(server_key)));
+            snprintf(client_keytype, sizeof(client_keytype), "%s", ssh_key_type_to_char(ssh_key_type(entry->publickey)));
+            #ifdef __EBCDIC__
+            ssh_string_to_ebcdic(server_keytype, server_keytype, strlen(server_keytype));
+            ssh_string_to_ebcdic(client_keytype, client_keytype, strlen(client_keytype));
+            #endif
             SSH_LOG(SSH_LOG_FUNCTIONS, "Server key (%s) matches key in known hosts file (%s)",
-                    ssh_key_type_to_char(ssh_key_type(server_key)),
-                    ssh_key_type_to_char(ssh_key_type(entry->publickey)));
+                    server_keytype,
+                    client_keytype);
             found = SSH_KNOWN_HOSTS_OK;
             if (pentry != NULL) {
                 *pentry = entry;
