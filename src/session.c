@@ -356,14 +356,14 @@ const char* ssh_get_serverbanner(ssh_session session) {
     if(!session) {
         return NULL;
     }
+    // copy to static buffer and free malloc'd memory
+    strncpy(banner_local, session->serverbanner, sizeof(banner_local));
+    banner_local[sizeof(banner_local)-1] = '\0';
     // char conversion
-    res = ssh_string_utf8_to_local(session, session->serverbanner);
+    res = ssh_string_utf8_to_local(session, banner_local);
     if (res==NULL)
         return session->serverbanner;
-    // copy to static buffer and free malloc'd memory
-    strncpy(banner_local, res, sizeof(banner_local));
-    banner_local[sizeof(banner_local)-1] = '\0';
-    if (res != session->serverbanner)
+    if (res != banner_local)
         free(res);
     return banner_local;
 }
