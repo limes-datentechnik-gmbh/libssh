@@ -1005,9 +1005,9 @@ int pki_import_privkey_buffer(enum ssh_keytypes_e type,
                 ssh_print_hexa("p", ssh_string_data(p), ssh_string_len(p));
                 ssh_print_hexa("q", ssh_string_data(q), ssh_string_len(q));
                 ssh_print_hexa("g", ssh_string_data(g), ssh_string_len(g));
-                ssh_print_hexa("pubkey", ssh_string_data(pubkey),
+//                ssh_print_hexa("pubkey", ssh_string_data(pubkey),
                                ssh_string_len(pubkey));
-                ssh_print_hexa("privkey", ssh_string_data(privkey),
+//                ssh_print_hexa("privkey", ssh_string_data(privkey),
                                ssh_string_len(privkey));
 #endif
                 ssh_string_burn(p);
