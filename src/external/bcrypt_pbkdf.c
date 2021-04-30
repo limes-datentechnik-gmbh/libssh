@@ -66,8 +66,14 @@ static void
 bcrypt_hash(uint8_t *sha2pass, uint8_t *sha2salt, uint8_t *out)
 {
 	ssh_blf_ctx state;
+#ifdef __EBCDIC__
+#pragma convert("ISO8859-1")
+#endif
 	uint8_t ciphertext[BCRYPT_HASHSIZE] =
 	    "OxychromaticBlowfishSwatDynamite";
+#ifdef __EBCDIC__
+#pragma convert(pop)
+#endif
 	uint32_t cdata[BCRYPT_BLOCKS];
 	int i;
 	uint16_t j;
