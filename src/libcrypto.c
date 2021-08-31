@@ -59,6 +59,10 @@
 #define CAN_DISABLE_AESNI
 #endif
 
+#ifdef HAVE_OPENSSL_CRYPTO_CTR128_ENCRYPT
+#include <openssl/modes.h>
+#endif
+
 #include "libssh/crypto.h"
 
 struct ssh_mac_ctx_struct {
