@@ -33,6 +33,8 @@
 #include "libssh/crypto.h"
 #include "libssh/wrapper.h"
 #include "libssh/libcrypto.h"
+#include "libssh/limes.h"
+#include "libssh/limes/CRYPTHDL.h"
 
 #ifdef HAVE_LIBCRYPTO
 
@@ -1120,6 +1122,122 @@ void ssh_crypto_finalize(void)
     CRYPTO_cleanup_all_ex_data();
 
     libcrypto_initialized = 0;
+}
+
+static int flcrypto_encrypt_init(struct ssh_cipher_struct *cipher, void *key, void *IV) {
+   SymCryptoFunctions* cryptoFuncs = (SymCryptoFunctions*)cipher->cipher;
+   CryptoHdl* hdl = (void*)cipher->ctx;
+   fprintf(stderr, "Using custom encryption for %s\n", cipher->name);
+   if (cipher->ctx == NULL) {
+      hdl = cryptoFuncs->encryptInit(cryptoFuncs->algorithm, 0, NULL, 0, NULL);
+      if (hdl == NULL) {
+         SSH_LOG(SSH_LOG_WARNING, "Encrypt constructor failed");
+         return SSH_ERROR;
+      }
+      cipher->ctx = (void*)hdl;
+   }
+   if (hdl->init(hdl, hdl->keyLen(hdl), key, hdl->ivLen(hdl), IV) != 0) {
+      SSH_LOG(SSH_LOG_WARNING, "Encrypt init failed");
+      return SSH_ERROR;
+   }
+   return 0;
+}
+
+static int flcrypto_decrypt_init(struct ssh_cipher_struct *cipher, void *key, void *IV) {
+   SymCryptoFunctions* cryptoFuncs = (SymCryptoFunctions*)cipher->cipher;
+   CryptoHdl* hdl = (void*)cipher->ctx;
+   fprintf(stderr, "Using custom decryption for %s\n", cipher->name);
+   if (cipher->ctx == NULL) {
+      hdl = cryptoFuncs->decryptInit(cryptoFuncs->algorithm, 0, NULL, 0, NULL);
+      if (hdl == NULL) {
+         SSH_LOG(SSH_LOG_WARNING, "Decrypt constructor failed");
+         return SSH_ERROR;
+      }
+      cipher->ctx = (void*)hdl;
+   }
+   if (hdl->init(hdl, hdl->keyLen(hdl), key, hdl->ivLen(hdl), IV) != 0) {
+      SSH_LOG(SSH_LOG_WARNING, "Decrypt init failed");
+      return SSH_ERROR;
+   }
+   return 0;
+}
+
+static void flcrypto_encrypt(struct ssh_cipher_struct *cipher, void *in, void *out, size_t len) {
+   U32 outlen = 0;
+   CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
+   if (hdl->update(hdl, &outlen, out, len, in)) {
+      SSH_LOG(SSH_LOG_WARNING, "Encrypt failed");
+      return;
+   }
+   if (outlen != len) {
+      SSH_LOG(SSH_LOG_WARNING, "Encrypt: output size %u for %zu in", outlen, len);
+      return;
+   }
+}
+
+static void flcrypto_decrypt(struct ssh_cipher_struct *cipher, void *in, void *out, size_t len) {
+   U32 outlen = 0;
+   CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
+   if (hdl->update(hdl, &outlen, out, len, in)) {
+      SSH_LOG(SSH_LOG_WARNING, "Decrypt failed");
+      return;
+   }
+   if (outlen != len) {
+      SSH_LOG(SSH_LOG_WARNING, "Decrypt: output size %u for %zu in", outlen, len);
+      return;
+   }
+}
+
+static void flcrypto_cleanup(struct ssh_cipher_struct *cipher) {
+   CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
+   hdl->free(&hdl);
+   cipher->ctx = NULL;
+}
+
+static enum ssh_cipher_e translate_algo(SymCryptoAlgo algo) {
+   switch (algo) {
+      case AES128_CBC_NOPAD: return SSH_AES128_CBC;
+      case AES192_CBC_NOPAD: return SSH_AES192_CBC;
+      case AES256_CBC_NOPAD: return SSH_AES256_CBC;
+      case AES128_CTR: return SSH_AES128_CTR;
+      case AES192_CTR: return SSH_AES192_CTR;
+      case AES256_CTR: return SSH_AES256_CTR;
+      default:
+         break;
+   }
+   SSH_LOG(SSH_LOG_WARNING, "translate_algo(): Unsupported algorithm %d", algo);
+   return SSH_NO_CIPHER;
+}
+
+#define FLCRYPTO_MAXFUNCS 32
+static SymCryptoFunctions funcs[FLCRYPTO_MAXFUNCS] = {0};
+static size_t numFuncs = 0;
+
+/**
+ * Sets constructor functions for custom encryption implementations.
+ * @param funcs
+ */
+LIBSSH_API void set_symmetric_crypto(const SymCryptoFunctions* func) {
+   enum ssh_cipher_e ciphertype = translate_algo(func->algorithm);
+   for (struct ssh_cipher_struct* cur = ssh_ciphertab; cur->name != NULL; cur++) {
+      if (cur->ciphertype == ciphertype) {
+         if (numFuncs >= FLCRYPTO_MAXFUNCS) {
+            SSH_LOG(SSH_LOG_WARNING, "set_symmetric_crypto(): Functions array full");
+            return;
+         }
+         // copy struct so that it remains valid memory
+         funcs[numFuncs] = *func;
+
+         cur->cipher = (const EVP_CIPHER *)&funcs[numFuncs];
+         cur->set_encrypt_key = flcrypto_encrypt_init;
+         cur->set_decrypt_key = flcrypto_decrypt_init;
+         cur->encrypt = flcrypto_encrypt;
+         cur->decrypt = flcrypto_decrypt;
+         cur->cleanup = flcrypto_cleanup;
+         numFuncs++;
+         break;
+      }
+   }
 }
 
 #endif /* LIBCRYPTO */
