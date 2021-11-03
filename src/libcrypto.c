@@ -1127,7 +1127,8 @@ void ssh_crypto_finalize(void)
 static int flcrypto_encrypt_init(struct ssh_cipher_struct *cipher, void *key, void *IV) {
    SymCryptoFunctions* cryptoFuncs = (SymCryptoFunctions*)cipher->cipher;
    CryptoHdl* hdl = (void*)cipher->ctx;
-   fprintf(stderr, "Using custom encryption for %s\n", cipher->name);
+   SSH_LOG(SSH_LOG_FUNCTIONS, "Using Limes encryption for %s", cipher->name);
+   //fprintf(stderr, "Using Limes encryption for %s\n", cipher->name);
    if (cipher->ctx == NULL) {
       hdl = cryptoFuncs->encryptInit(cryptoFuncs->algorithm, 0, NULL, 0, NULL);
       if (hdl == NULL) {
@@ -1146,7 +1147,8 @@ static int flcrypto_encrypt_init(struct ssh_cipher_struct *cipher, void *key, vo
 static int flcrypto_decrypt_init(struct ssh_cipher_struct *cipher, void *key, void *IV) {
    SymCryptoFunctions* cryptoFuncs = (SymCryptoFunctions*)cipher->cipher;
    CryptoHdl* hdl = (void*)cipher->ctx;
-   fprintf(stderr, "Using custom decryption for %s\n", cipher->name);
+   SSH_LOG(SSH_LOG_FUNCTIONS, "Using Limes decryption for %s", cipher->name);
+   //fprintf(stderr, "Using Limes decryption for %s\n", cipher->name);
    if (cipher->ctx == NULL) {
       hdl = cryptoFuncs->decryptInit(cryptoFuncs->algorithm, 0, NULL, 0, NULL);
       if (hdl == NULL) {
