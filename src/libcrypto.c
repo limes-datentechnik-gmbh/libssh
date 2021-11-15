@@ -1127,19 +1127,31 @@ void ssh_crypto_finalize(void)
 static int flcrypto_encrypt_init(struct ssh_cipher_struct *cipher, void *key, void *IV) {
    SymCryptoFunctions* cryptoFuncs = (SymCryptoFunctions*)cipher->cipher;
    CryptoHdl* hdl = (void*)cipher->ctx;
-   SSH_LOG(SSH_LOG_FUNCTIONS, "Using Limes encryption for %s", cipher->name);
-   //fprintf(stderr, "Using Limes encryption for %s\n", cipher->name);
+
    if (cipher->ctx == NULL) {
       hdl = cryptoFuncs->encryptInit(cryptoFuncs->algorithm, 0, NULL, 0, NULL);
       if (hdl == NULL) {
-         SSH_LOG(SSH_LOG_WARNING, "Encrypt constructor failed");
+         SSH_LOG(SSH_LOG_WARNING, "Encrypt constructor failed for %s", cipher->name);
          return SSH_ERROR;
       }
       cipher->ctx = (void*)hdl;
    }
+   if (hdl->impl(hdl) == CRYPTO_HARDWARE) {
+      SSH_LOG(SSH_LOG_FUNCTIONS, "Using hardware-accelerated Limes encryption for %s", cipher->name);
+   } else {
+      SSH_LOG(SSH_LOG_FUNCTIONS, "Using Limes encryption for %s", cipher->name);
+   }
    if (hdl->init(hdl, hdl->keyLen(hdl), key, hdl->ivLen(hdl), IV) != 0) {
-      SSH_LOG(SSH_LOG_WARNING, "Encrypt init failed");
+      SSH_LOG(SSH_LOG_WARNING, "Encrypt init failed (%s)", hdl->errorMsg(hdl));
       return SSH_ERROR;
+   }
+   if (cipher->ciphertype == SSH_AEAD_AES128_GCM ||
+       cipher->ciphertype == SSH_AEAD_AES256_GCM) {
+       I32 rc = hdl->control(hdl, CONTROL_GCM_SET_IV_RFC5647, 12, IV);
+       if (rc != 0) {
+          SSH_LOG(SSH_LOG_WARNING, "Encrypt init of RFC 5647 IV failed (%d - %s)", rc, hdl->errorMsg(hdl));
+          return SSH_ERROR;
+       }
    }
    return 0;
 }
@@ -1147,19 +1159,31 @@ static int flcrypto_encrypt_init(struct ssh_cipher_struct *cipher, void *key, vo
 static int flcrypto_decrypt_init(struct ssh_cipher_struct *cipher, void *key, void *IV) {
    SymCryptoFunctions* cryptoFuncs = (SymCryptoFunctions*)cipher->cipher;
    CryptoHdl* hdl = (void*)cipher->ctx;
-   SSH_LOG(SSH_LOG_FUNCTIONS, "Using Limes decryption for %s", cipher->name);
-   //fprintf(stderr, "Using Limes decryption for %s\n", cipher->name);
+
    if (cipher->ctx == NULL) {
       hdl = cryptoFuncs->decryptInit(cryptoFuncs->algorithm, 0, NULL, 0, NULL);
       if (hdl == NULL) {
-         SSH_LOG(SSH_LOG_WARNING, "Decrypt constructor failed");
+         SSH_LOG(SSH_LOG_WARNING, "Decrypt constructor failed for %s", cipher->name);
          return SSH_ERROR;
       }
       cipher->ctx = (void*)hdl;
    }
+   if (hdl->impl(hdl) == CRYPTO_HARDWARE) {
+      SSH_LOG(SSH_LOG_FUNCTIONS, "Using hardware-accelerated Limes decryption for %s", cipher->name);
+   } else {
+      SSH_LOG(SSH_LOG_FUNCTIONS, "Using Limes decryption for %s", cipher->name);
+   }
    if (hdl->init(hdl, hdl->keyLen(hdl), key, hdl->ivLen(hdl), IV) != 0) {
-      SSH_LOG(SSH_LOG_WARNING, "Decrypt init failed");
+      SSH_LOG(SSH_LOG_WARNING, "Decrypt init failed (%s)", hdl->errorMsg(hdl));
       return SSH_ERROR;
+   }
+   if (cipher->ciphertype == SSH_AEAD_AES128_GCM ||
+       cipher->ciphertype == SSH_AEAD_AES256_GCM) {
+       I32 rc = hdl->control(hdl, CONTROL_GCM_SET_IV_RFC5647, 12, IV);
+       if (rc != 0) {
+          SSH_LOG(SSH_LOG_WARNING, "Decrypt init of RFC 5647 IV failed (%d - %s)", rc, hdl->errorMsg(hdl));
+          return SSH_ERROR;
+       }
    }
    return 0;
 }
@@ -1168,7 +1192,7 @@ static void flcrypto_encrypt(struct ssh_cipher_struct *cipher, void *in, void *o
    U32 outlen = 0;
    CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
    if (hdl->update(hdl, &outlen, out, len, in)) {
-      SSH_LOG(SSH_LOG_WARNING, "Encrypt failed");
+      SSH_LOG(SSH_LOG_WARNING, "Encrypt failed (%s)", hdl->errorMsg(hdl));
       return;
    }
    if (outlen != len) {
@@ -1181,7 +1205,7 @@ static void flcrypto_decrypt(struct ssh_cipher_struct *cipher, void *in, void *o
    U32 outlen = 0;
    CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
    if (hdl->update(hdl, &outlen, out, len, in)) {
-      SSH_LOG(SSH_LOG_WARNING, "Decrypt failed");
+      SSH_LOG(SSH_LOG_WARNING, "Decrypt failed (%s)", hdl->errorMsg(hdl));
       return;
    }
    if (outlen != len) {
@@ -1189,6 +1213,109 @@ static void flcrypto_decrypt(struct ssh_cipher_struct *cipher, void *in, void *o
       return;
    }
 }
+
+static void flcrypto_aead_encrypt(struct ssh_cipher_struct *cipher, void *in, void *out, size_t len, uint8_t *tag, uint64_t seq) {
+    size_t aadlen;
+    //uint8_t lastiv[1];
+    U32 tmplen = 0;
+    //int rc;
+    U32 outlen = 0;
+    CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
+
+    (void) seq;
+
+    aadlen = cipher->lenfield_blocksize;
+
+    /* increment IV */
+    if(hdl->control(hdl, CONTROL_GCM_NEXT_IV, 0, NULL)) {
+       SSH_LOG(SSH_LOG_WARNING, "Decrypt: Failed CONTROL_GCM_NEXT_IV (%s)", hdl->errorMsg(hdl));
+       return;
+    }
+
+    /* Pass over the authenticated data (not encrypted) */
+    if (hdl->update(hdl, NULL, NULL, aadlen, in)) {
+        SSH_LOG(SSH_LOG_WARNING, "Encrypt: Failed to pass authenticated data (%s)", hdl->errorMsg(hdl));
+        return;
+    }
+    memcpy(out, in, aadlen);
+
+    /* Encrypt the rest of the data */
+    if (hdl->update(hdl, &tmplen, (unsigned char *)out + aadlen, len - aadlen, (unsigned char *)in + aadlen)) {
+        SSH_LOG(SSH_LOG_WARNING, "Encrypt: Failed to encrypt data (%s)", hdl->errorMsg(hdl));
+        return;
+    }
+    outlen = tmplen;
+    if (hdl->final(hdl, &tmplen, (unsigned char *)out + aadlen + outlen)) {
+        SSH_LOG(SSH_LOG_WARNING, "Encrypt: Failed to finalize encrypted data (%s)", hdl->errorMsg(hdl));
+        return;
+    }
+    outlen += tmplen;
+    if (outlen != (int)len - aadlen) {
+        SSH_LOG(SSH_LOG_WARNING, "Encrypt: Unexpected output length");
+        return;
+    }
+
+    /* compute tag */
+    if (hdl->final(hdl, NULL, tag)) {
+        SSH_LOG(SSH_LOG_WARNING, "Encrypt: Failed to get tag (%s)", hdl->errorMsg(hdl));
+        return;
+    }
+}
+
+static int flcrypto_aead_decrypt(struct ssh_cipher_struct *cipher, void *complete_packet, uint8_t *out, size_t encrypted_size, uint64_t seq) {
+    size_t aadlen;
+    U32 outlen = 0;
+    CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
+
+    (void)seq;
+
+    aadlen = cipher->lenfield_blocksize;
+
+    /* increment IV */
+    if(hdl->control(hdl, CONTROL_GCM_NEXT_IV, 0, NULL)) {
+       SSH_LOG(SSH_LOG_WARNING, "Decrypt: Failed CONTROL_GCM_NEXT_IV (%s)", hdl->errorMsg(hdl));
+       return SSH_ERROR;
+    }
+
+    /* set tag for authentication */
+    if (hdl->final(hdl, NULL, (unsigned char *)complete_packet + aadlen + encrypted_size)) {
+        SSH_LOG(SSH_LOG_WARNING, "Decrypt: Failed to set tag (%s)", hdl->errorMsg(hdl));
+        return SSH_ERROR;
+    }
+
+    /* Pass over the authenticated data (not encrypted) */
+    if (hdl->update(hdl, NULL, NULL, aadlen, complete_packet)) {
+        SSH_LOG(SSH_LOG_WARNING, "Decrypt: Failed to pass authenticated data (%s)", hdl->errorMsg(hdl));
+        return SSH_ERROR;
+    }
+    /* Do not copy the length to the target buffer, because it is already processed */
+    //memcpy(out, complete_packet, aadlen);
+
+    /* Decrypt the rest of the data */
+    if (hdl->update(hdl, &outlen, (unsigned char *)out, encrypted_size, (unsigned char *)complete_packet + aadlen)) {
+        SSH_LOG(SSH_LOG_WARNING, "Decrypt: Failed to decrypt data (%s)", hdl->errorMsg(hdl));
+        return SSH_ERROR;
+    }
+
+    if (outlen != (int)encrypted_size) {
+        SSH_LOG(SSH_LOG_WARNING, "Decrypt: output size %u for %zd in", outlen, encrypted_size);
+        return SSH_ERROR;
+    }
+
+    /* verify tag */
+    if (hdl->final(hdl, &outlen, (unsigned char *)out + outlen)) {
+        SSH_LOG(SSH_LOG_WARNING, "Decrypt: Failed authentication tag verification (%s)", hdl->errorMsg(hdl));
+        return SSH_ERROR;
+    }
+
+    if (outlen != 0) {
+        SSH_LOG(SSH_LOG_WARNING, "Decrypt: final size %u is not 0", outlen);
+        return SSH_ERROR;
+    }
+
+    return SSH_OK;
+}
+
 
 static void flcrypto_cleanup(struct ssh_cipher_struct *cipher) {
    CryptoHdl* hdl = (CryptoHdl*)cipher->ctx;
@@ -1204,6 +1331,8 @@ static enum ssh_cipher_e translate_algo(SymCryptoAlgo algo) {
       case AES128_CTR: return SSH_AES128_CTR;
       case AES192_CTR: return SSH_AES192_CTR;
       case AES256_CTR: return SSH_AES256_CTR;
+      case AES128_GCM: return SSH_AEAD_AES128_GCM;
+      case AES256_GCM: return SSH_AEAD_AES256_GCM;
       default:
          break;
    }
@@ -1233,9 +1362,14 @@ LIBSSH_API void set_symmetric_crypto(const SymCryptoFunctions* func) {
          cur->cipher = (const EVP_CIPHER *)&funcs[numFuncs];
          cur->set_encrypt_key = flcrypto_encrypt_init;
          cur->set_decrypt_key = flcrypto_decrypt_init;
-         cur->encrypt = flcrypto_encrypt;
-         cur->decrypt = flcrypto_decrypt;
          cur->cleanup = flcrypto_cleanup;
+         if (func->isAead) {
+            cur->aead_encrypt = flcrypto_aead_encrypt;
+            cur->aead_decrypt = flcrypto_aead_decrypt;
+         } else {
+            cur->encrypt = flcrypto_encrypt;
+            cur->decrypt = flcrypto_decrypt;
+         }
          numFuncs++;
          break;
       }

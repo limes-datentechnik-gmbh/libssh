@@ -24,16 +24,19 @@ typedef enum SymCryptoAlgo {
    AES128_OFB,
    AES128_CFB,
    AES128_CTR,
+   AES128_GCM,
    AES192_ECB_NOPAD, AES192_ECB_PKCS,
    AES192_CBC_NOPAD, AES192_CBC_PKCS,
    AES192_OFB,
    AES192_CFB,
    AES192_CTR,
+   AES192_GCM,
    AES256_ECB_NOPAD, AES256_ECB_PKCS,
    AES256_CBC_NOPAD, AES256_CBC_PKCS,
    AES256_OFB,
    AES256_CFB,
    AES256_CTR,
+   AES256_GCM,
    TDES_ECB_NOPAD, TDES_ECB_PKCS,
    TDES_CBC_NOPAD, TDES_CBC_PKCS,
    TDES_OFB,
@@ -61,7 +64,8 @@ typedef enum SymCryptoAlgo {
    CAMELLIA256_ECB_NOPAD, CAMELLIA256_ECB_PKCS,
    CAMELLIA256_CBC_NOPAD, CAMELLIA256_CBC_PKCS,
    CAMELLIA256_OFB,
-   CAMELLIA256_CFB
+   CAMELLIA256_CFB,
+   SYMCRYPTOALGO_COUNT
 } SymCryptoAlgo;
 
 typedef enum CryptoImpl {
@@ -74,6 +78,11 @@ typedef enum CryptoPadding {
    PADDING_NONE,
    PADDING_PKCS,
 } CryptoPadding;
+
+typedef enum CryptoControl {
+   CONTROL_GCM_SET_IV_RFC5647 = 1,
+   CONTROL_GCM_NEXT_IV
+} CryptoControl;
 
 typedef struct CryptoHdl {
    /**
@@ -111,6 +120,13 @@ typedef struct CryptoHdl {
     * output buffer is equal to uiInLen if the function succeeds. Calling final()
     * is optional.
     *
+    * FOR GCM:
+    *
+    * To incorporate additional authenticated data (AAD) into the authentication tag,
+    * set piOutLen and pcOut too NULL. AAD must be added before any data is encrypted
+    * or decrypted. If AAD was added during encryption, it must also be passed to this
+    * function when decrypting, otherwise tag verification will fail.
+    *
     * @param self Handle
     * @param piOutLen Contains the number of bytes written to pcOut if function succeeds,
     *                 optional (can be NULL, but is not recommended unless all input is multiple of block length)
@@ -125,7 +141,17 @@ typedef struct CryptoHdl {
     *
     * IMPORTANT: The output buffer size must be at least BLOCKSIZE.
     *
-    * Note that this function can fail on decryption if the padding is invalid.
+    * Note that this function can fail on decryption if the padding is invalid
+    * or tag verification fails (only GCM).
+    *
+    * FOR GCM:
+    *
+    * To retrieve the tag after encryption is done, call this function a seconds time with piOutLen set
+    * to NULL and a buffer large enough to store a block of the underlying cipher (e.g. 16 bytes for AES).
+    * During decryption, the tag must be set by calling this function with piOutLen set to NULL and a
+    * pointer to the tag value. This must happen prior to calling this function a second with
+    * piOutLen != NULL for finalization. During finalization the tag is validated. If the tag is not set
+    * during decryption, the result is a tag validation failure.
     *
     * @param self Handle
     * @param piOutLen Contains the number of bytes written to pcOut if function succeeds,
@@ -158,6 +184,20 @@ typedef struct CryptoHdl {
     * Returns the type of implementation used (OpenSSL, Hardware, Software (custom implementation))
     */
    CryptoImpl  (*impl) (struct CryptoHdl* self);
+   /**
+    * Controls the behavior if the file handle. Available control options depend on the algorithm.
+    *
+    * @param self handle
+    * @param enType Type of control option
+    * @param siArg Integer argument
+    * @param pvPtr Pointer argument
+    * @return Option dependent return value
+    */
+   I32  (*control)(struct CryptoHdl* self, CryptoControl enType, I32 siArg, void *pvPtr);
+   /**
+    * Returns an error message for the last error that occurred
+    */
+   const char* (*errorMsg) (struct CryptoHdl* self);
 } CryptoHdl;
 
 typedef CryptoHdl* (CryptoConstructor)(SymCryptoAlgo enAlgo, U32 uiKeyLen, const U08* pcKey, U32 uiIvLen, const U08* pcIv);
@@ -166,6 +206,7 @@ struct SymCryptoFunctions {
    CryptoConstructor* encryptInit;
    CryptoConstructor* decryptInit;
    SymCryptoAlgo algorithm;
+   U08 isAead;
 };
 
 // NOTE: Copy to libssh/include/libssh/limes/ after changing this header
